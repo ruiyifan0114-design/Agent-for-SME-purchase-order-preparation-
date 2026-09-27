@@ -22,6 +22,8 @@ Validation errors add `details` with field locations. CSV export returns a downl
 | GET | `/runs/{id}/exceptions` | Open and historical exceptions |
 | POST | `/exceptions/{id}/resolve` | Human correction; selected exception must actually disappear |
 | POST | `/runs/{id}/drafts` | Generate/reconcile supplier-grouped drafts, idempotently |
+| GET | `/runs/{id}/cockpit` | Stored management metrics and material changes versus the previous run |
+| POST | `/runs/{id}/simulate` | Read-only deterministic horizon/demand/stock-policy/lead-time scenario |
 | GET | `/drafts/{id}` | Header, current version, lines, source references |
 | PATCH | `/drafts/{id}/lines/{line_id}` | Human quantity/price edit; invalidate approval |
 | POST | `/drafts/{id}/approve` | Explicit human approval |

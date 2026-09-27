@@ -6,7 +6,7 @@ Date: 2026-09-27. Dataset and business values are synthetic.
 | --- | --- |
 | Python | CPython 3.12.13, project-local virtual environment |
 | PostgreSQL | 16.15, isolated WSL instance on localhost:55432 |
-| Full test suite on PostgreSQL | **70 passed**, including simultaneous draft generation and frontend integration endpoints |
+| Full test suite on PostgreSQL | **74 passed**, including simultaneous draft generation, cockpit, simulation and grounded agent brief endpoints |
 | Static checks | `ruff check backend tests migrations agent.py` passed |
 | Alembic | upgrade → check → downgrade → upgrade passed against PostgreSQL |
 | Schema drift | `alembic check`: no new upgrade operations |
@@ -16,7 +16,7 @@ Date: 2026-09-27. Dataset and business values are synthetic.
 | Demo run | 10 processed / 6 REORDER / 1 NO_REORDER / 3 BLOCKED |
 | Docker image | Configuration supplied; build not executed because local Docker engine was unavailable |
 | Frontend production build | TypeScript check and Vite build passed |
-| Browser workflows | **10 passed**, including landing/auth/account UI and procurement workflows, Edge, production assets served on port 8000 with real API |
+| Browser workflows | **11 passed**, including cockpit, what-if simulation, Daily Brief, landing/auth/account UI and procurement workflows, Edge, production assets served on port 8000 with real API |
 | Visual inspection | Desktop 1440px and mobile 390px screenshots inspected; mobile overflow check passed |
 | DeepSeek provider | Failure and untrusted model output tested with stubs; live paid provider not called |
 

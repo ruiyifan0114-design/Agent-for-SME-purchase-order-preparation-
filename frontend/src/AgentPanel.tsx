@@ -17,7 +17,7 @@ export default function AgentPanel({
   >([
     {
       role: 'agent',
-      text: 'I’m your procurement assistant. I can explain a SKU, prepare a check, or help you open a correction. Your dashboard remains the source of truth.',
+      text: 'I’m your procurement assistant. Ask for a daily brief, review changes, explain a SKU, or prepare the next action. Stored backend evidence remains the source of truth.',
     },
   ])
   const [input, setInput] = useState(''),
@@ -95,14 +95,16 @@ export default function AgentPanel({
         )}
       </div>
       <div className="chat-suggestions">
-        {["Run today's procurement check.", 'Why is SKU-004 blocked?', 'Show the PO drafts.'].map(
-          (s) => (
-            <button disabled={busy} onClick={() => void send(s)} key={s}>
-              <Sparkles size={12} />
-              {s}
-            </button>
-          ),
-        )}
+        {[
+          "Give me today's daily brief.",
+          'What changed since the last review?',
+          'Why is SKU-004 blocked?',
+        ].map((s) => (
+          <button disabled={busy} onClick={() => void send(s)} key={s}>
+            <Sparkles size={12} />
+            {s}
+          </button>
+        ))}
       </div>
       <form
         onSubmit={(e) => {

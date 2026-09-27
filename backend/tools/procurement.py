@@ -2,13 +2,14 @@ import csv
 import hashlib
 import io
 import json
+from copy import deepcopy
 from collections import Counter
 from datetime import date
 from decimal import Decimal
 from sqlalchemy import select
 from backend.domain.engine import amount, evaluate
 from backend.domain.intake import normalize, read_files
-from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest
+from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest, SimulationRequest
 from backend.models.entities import (ApprovalEvent, Demand, ExceptionRecord, ImportBatch, Inventory,
     OpenPO, PODraft, POLine, ProcurementRun, SKU, SKUCheckResult, Supplier, SupplierSKU, ToolExecutionLog, now)
 from backend.tools.runtime import BusinessError, audited, serial
@@ -277,6 +278,97 @@ class ProcurementTools:
     def list_po_drafts(self, run_id):
         self._get(ProcurementRun, run_id)
         return [self._draft(d) for d in self._rows(PODraft, run_id=run_id)]
+
+    def _decision_metrics(self, answers):
+        counts = Counter(answer["status"] for answer in answers)
+        value = Decimal(0)
+        suppliers = Counter()
+        warnings = 0
+        for answer in answers:
+            warnings += sum(e["severity"] == "WARNING" for e in answer.get("exceptions", []))
+            if answer["status"] == "REORDER":
+                evidence = answer.get("evidence", {})
+                price = Decimal(str(evidence.get("unit_price", 0)))
+                value += amount(answer["final_order_qty"], price)
+                suppliers[evidence.get("supplier_id", "UNMAPPED")] += amount(answer["final_order_qty"], price)
+        total = len(answers)
+        return {
+            "total_skus": total,
+            "reorder": counts["REORDER"],
+            "no_reorder": counts["NO_REORDER"],
+            "blocked": counts["BLOCKED"],
+            "decision_completion": round((counts["REORDER"] + counts["NO_REORDER"]) / total * 100) if total else 0,
+            "recommendation_value": str(value),
+            "supplier_count": len(suppliers),
+            "warning_count": warnings,
+            "spend_by_supplier": [{"supplier_id": key, "value": str(val)} for key, val in suppliers.most_common()],
+        }
+
+    @audited
+    def procurement_cockpit(self, run_id):
+        run = self._get(ProcurementRun, run_id)
+        results = self._rows(SKUCheckResult, run_id=run_id)
+        answers = [serial(result) for result in results if result.revision > 0]
+        current = self._decision_metrics(answers)
+        open_exceptions = self._rows(ExceptionRecord, run_id=run_id, status="OPEN")
+        current["warning_count"] = sum(exc.severity == "WARNING" for exc in open_exceptions)
+        drafts = self._rows(PODraft, run_id=run_id)
+        current["approved_value"] = str(sum((d.total for d in drafts if d.status == "APPROVED"), Decimal(0)))
+        current["approval_progress"] = round(sum(d.status == "APPROVED" for d in drafts) / len(drafts) * 100) if drafts else 0
+        previous = self.db.scalar(select(ProcurementRun).where(
+            ProcurementRun.id != run.id, ProcurementRun.created_at < run.created_at
+        ).order_by(ProcurementRun.created_at.desc()).limit(1))
+        comparison = {"previous_run_id": None, "changes": [], "summary": {}}
+        if previous:
+            old = {r.sku_id: r for r in self._rows(SKUCheckResult, run_id=previous.id) if r.revision > 0}
+            changes = []
+            for result in results:
+                before = old.get(result.sku_id)
+                if before and (before.status != result.status or before.final_order_qty != result.final_order_qty):
+                    changes.append({"sku_id": result.sku_id, "before_status": before.status,
+                        "after_status": result.status, "before_qty": before.final_order_qty,
+                        "after_qty": result.final_order_qty, "reason": result.decision_reason})
+            comparison = {"previous_run_id": previous.id, "changes": changes,
+                "summary": {"status_changes": sum(c["before_status"] != c["after_status"] for c in changes),
+                            "quantity_changes": sum(c["before_qty"] != c["after_qty"] for c in changes)}}
+        return {"run_id": run.id, "as_of": run.as_of, "currency": run.currency,
+                "metrics": current, "comparison": comparison}
+
+    @audited
+    def simulate_procurement(self, run_id, request: SimulationRequest):
+        run = self._get(ProcurementRun, run_id)
+        results = self._rows(SKUCheckResult, run_id=run_id)
+        policy_data = self._policy(run).model_dump()
+        if request.horizon is not None:
+            policy_data["horizon"] = request.horizon
+        policy = RunRequest(**policy_data)
+        simulated = []
+        changes = []
+        for result in results:
+            context = deepcopy(result.context)
+            sku = context["sku"]
+            if sku.get("safety_stock") is not None:
+                sku["safety_stock"] = round(sku["safety_stock"] * request.safety_stock_percent / 100)
+            if sku.get("target_stock") is not None and sku.get("safety_stock") is not None:
+                sku["target_stock"] = max(sku["safety_stock"], round(sku["target_stock"] * request.safety_stock_percent / 100))
+            for demand in context["demand"]:
+                if demand.get("quantity") is not None:
+                    demand["quantity"] = round(demand["quantity"] * request.demand_percent / 100)
+            for commercial in context["commercial"]:
+                if commercial.get("lead_time_days") is not None:
+                    commercial["lead_time_days"] = max(0, commercial["lead_time_days"] + request.lead_time_delta_days)
+            answer = evaluate(context, policy)
+            simulated.append(answer)
+            if result.revision > 0 and (result.status != answer["status"] or result.final_order_qty != answer["final_order_qty"]):
+                changes.append({"sku_id": result.sku_id, "before_status": result.status,
+                    "after_status": answer["status"], "before_qty": result.final_order_qty,
+                    "after_qty": answer["final_order_qty"], "reason": answer["decision_reason"]})
+        baseline = self._decision_metrics([serial(r) for r in results if r.revision > 0])
+        baseline["warning_count"] = sum(
+            exc.severity == "WARNING" for exc in self._rows(ExceptionRecord, run_id=run_id, status="OPEN"))
+        return {"run_id": run.id, "inputs": request.model_dump(), "baseline": baseline,
+                "scenario": self._decision_metrics(simulated), "changes": changes,
+                "disclaimer": "Read-only deterministic scenario. No run, source data, draft or approval was changed."}
 
     @audited
     def agent_message(self, request):

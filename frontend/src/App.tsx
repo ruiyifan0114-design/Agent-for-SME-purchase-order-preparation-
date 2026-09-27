@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   Bell,
   Bot,
+  ChartNoAxesCombined,
   CheckCheck,
   ChevronDown,
   CircleHelp,
@@ -28,6 +29,7 @@ import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } fro
 import { PublicExperience, type WorkspaceUser } from './PublicExperience'
 import {
   AuditScreen,
+  CockpitScreen,
   Dashboard,
   DataScreen,
   DraftScreen,
@@ -42,6 +44,7 @@ import type {
   AuditEvent,
   Batch,
   Check,
+  Cockpit,
   Context,
   Credentials,
   Draft,
@@ -53,6 +56,7 @@ import type {
 
 const navigation = [
   { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+  { id: 'intelligence', label: 'Decision cockpit', icon: ChartNoAxesCombined },
   { id: 'data', label: 'Data intake', icon: Database },
   { id: 'skus', label: 'SKU check', icon: ClipboardCheck },
   { id: 'exceptions', label: 'Exceptions', icon: AlertCircle },
@@ -97,6 +101,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
   const [results, setResults] = useState<Check[]>([]),
     [exceptions, setExceptions] = useState<ExceptionItem[]>([]),
     [drafts, setDrafts] = useState<Draft[]>([]),
+    [cockpit, setCockpit] = useState<Cockpit | null>(null),
     [events, setEvents] = useState<AuditEvent[]>([])
   const [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
@@ -129,17 +134,19 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     const seq = ++generation.current
     setLoading(true)
     try {
-      const [r, s, e, d] = await Promise.all([
+      const [r, s, e, d, c] = await Promise.all([
         api.run(id),
         api.results(id),
         api.exceptions(id),
         api.drafts(id),
+        api.cockpit(id),
       ])
       if (seq !== generation.current) return
       setRun(r)
       setResults(s.sort((a, b) => a.sku_id.localeCompare(b.sku_id)))
       setExceptions(e)
       setDrafts(d.sort((a, b) => a.supplier_id.localeCompare(b.supplier_id)))
+      setCockpit(c)
     } finally {
       if (seq === generation.current) setLoading(false)
     }
@@ -162,6 +169,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
         setResults([])
         setExceptions([])
         setDrafts([])
+        setCockpit(null)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load workspace')
@@ -191,6 +199,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     setResults([])
     setExceptions([])
     setDrafts([])
+    setCockpit(null)
     try {
       await loadRun(id)
     } catch (e) {
@@ -382,6 +391,8 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
         })
         setChat(false)
       }
+    } else if (reply.action === 'INSIGHTS') {
+      go('intelligence')
     }
   }
   const badgeCount = run?.blocked_count || 0
@@ -565,6 +576,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
                   busy={busy}
                 />
               )}
+              {screen === 'intelligence' && <CockpitScreen run={run} cockpit={cockpit} />}
               {screen === 'data' && (
                 <DataScreen
                   batches={batches}

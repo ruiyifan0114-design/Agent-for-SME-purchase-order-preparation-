@@ -190,10 +190,61 @@ export interface Report {
 }
 export interface AgentReply {
   message: string
-  action: 'NONE' | 'RUN' | 'DRAFTS' | 'PRICE' | 'EXPLAIN'
+  action: 'NONE' | 'RUN' | 'DRAFTS' | 'PRICE' | 'EXPLAIN' | 'BRIEF' | 'INSIGHTS'
   sku_id?: string | null
   unit_price?: string | null
   provider: string
+}
+
+export interface DecisionMetrics {
+  total_skus: number
+  reorder: number
+  no_reorder: number
+  blocked: number
+  decision_completion: number
+  recommendation_value: string
+  approved_value?: string
+  approval_progress?: number
+  supplier_count: number
+  warning_count: number
+  spend_by_supplier: { supplier_id: string; value: string }[]
+}
+
+export interface DecisionChange {
+  sku_id: string
+  before_status: string
+  after_status: string
+  before_qty: number | null
+  after_qty: number | null
+  reason: string
+}
+
+export interface Cockpit {
+  run_id: string
+  as_of: string
+  currency: string
+  metrics: DecisionMetrics
+  comparison: {
+    previous_run_id: string | null
+    changes: DecisionChange[]
+    summary: { status_changes?: number; quantity_changes?: number }
+  }
+}
+
+export interface SimulationInput {
+  horizon?: number
+  demand_percent: number
+  safety_stock_percent: number
+  lead_time_delta_days: number
+}
+
+export interface Simulation {
+  run_id: string
+  inputs: SimulationInput
+  baseline: DecisionMetrics
+  scenario: DecisionMetrics
+  changes: DecisionChange[]
+  disclaimer: string
 }
 export interface Credentials {
   service: string

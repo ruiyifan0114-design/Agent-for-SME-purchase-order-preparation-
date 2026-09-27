@@ -4,17 +4,17 @@ Completed and verified on 2026-09-27. This replaces the source-only checkpoint.
 
 ## Delivered
 
-FastAPI/PostgreSQL backend and React/TypeScript frontend provide validated imports, deterministic SKU decisions, source evidence, correction forms, supplier PO drafts, explicit human approval, CSV export and audit history. The responsive workspace includes six pages, three synthetic demo scenarios, resumable scans, rejected import visibility, loading/error feedback and an agent panel.
+FastAPI/PostgreSQL backend and React/TypeScript frontend provide validated imports, deterministic SKU decisions, source evidence, correction forms, supplier PO drafts, explicit human approval, CSV export and audit history. The responsive workspace includes a management Decision Cockpit, read-only what-if simulation, run comparison, three synthetic demo scenarios, resumable scans, rejected import visibility, loading/error feedback and an agent panel.
 
-The agent explains saved decisions and opens proposed corrections. Saving changes and approving orders remain explicit user actions. Optional DeepSeek intent parsing runs on the backend. Provider credentials never enter the frontend bundle.
+The agent produces a grounded Daily Brief, opens deterministic insights, explains saved decisions and opens proposed corrections. Saving changes and approving orders remain explicit user actions. Optional DeepSeek intent parsing runs on the backend. Provider credentials never enter the frontend bundle.
 
 Vite supports local development; FastAPI serves production assets on port 8000. A multi-stage Docker configuration builds both components.
 
 ## Verification
 
 - Production TypeScript check and Vite build passed.
-- All 70 backend tests passed against PostgreSQL.
-- All 9 browser workflows passed against the production frontend and real API.
+- All 74 backend tests passed against PostgreSQL.
+- All 11 browser workflows passed against the production frontend and real API.
 - Desktop and mobile screenshots were visually inspected.
 - DeepSeek provider behavior was tested with stubs; no live paid provider request was made.
 - Docker configuration is supplied, but its image build was not tested because the local Docker engine was unavailable.

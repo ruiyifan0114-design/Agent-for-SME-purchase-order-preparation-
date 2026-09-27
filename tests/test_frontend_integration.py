@@ -8,6 +8,7 @@ from backend.agent import messages
 from backend.agent.messages import MessageRequest
 from backend.config import settings
 from backend.db.session import get_session
+from backend.domain.schemas import SimulationRequest
 from backend.main import app
 from backend.tools.runtime import BusinessError
 
@@ -94,3 +95,43 @@ def test_deepseek_cannot_supply_commercial_values(monkeypatch,t,start):
     monkeypatch.setattr(messages,"urlopen",lambda *a,**k:io.BytesIO(json.dumps(payload).encode()))
     reply=t.agent_message(MessageRequest(message="Amend SKU-004 please",run_id=start()))
     assert reply["action"] == "NONE" and reply["unit_price"] is None
+
+
+def test_decision_cockpit_uses_stored_results_and_previous_run(t, start):
+    first = start()
+    second = start()
+    cockpit = t.procurement_cockpit(second)
+    assert cockpit["metrics"]["total_skus"] == 10
+    assert cockpit["metrics"]["reorder"] + cockpit["metrics"]["no_reorder"] + cockpit["metrics"]["blocked"] == 10
+    assert cockpit["metrics"]["recommendation_value"] != "0"
+    assert cockpit["comparison"]["previous_run_id"] == first
+
+
+def test_what_if_simulation_is_read_only_and_deterministic(t, start):
+    run = start()
+    before = t.get_all_skus(run)
+    result = t.simulate_procurement(run, SimulationRequest(
+        horizon=30, demand_percent=150, safety_stock_percent=120, lead_time_delta_days=5))
+    assert result["scenario"]["total_skus"] == result["baseline"]["total_skus"] == 10
+    assert "Read-only" in result["disclaimer"]
+    assert t.get_all_skus(run) == before
+
+
+def test_agent_daily_brief_and_insights_are_grounded_in_current_run(t, start):
+    run = start()
+    brief = t.agent_message(MessageRequest(message="Give me today's daily brief", run_id=run))
+    assert brief["action"] == "BRIEF"
+    assert "10 SKUs reviewed" in brief["message"] and "Recommended value" in brief["message"]
+    insight = t.agent_message(MessageRequest(message="What changed since the last review?", run_id=run))
+    assert insight["action"] == "INSIGHTS"
+    assert "deterministic and read-only" in insight["message"]
+
+
+def test_cockpit_and_simulation_http_endpoints(web, start):
+    run = start()
+    assert web.get(f"/api/v1/runs/{run}/cockpit").status_code == 200
+    response = web.post(f"/api/v1/runs/{run}/simulate", json={
+        "horizon": 21, "demand_percent": 110, "safety_stock_percent": 100,
+        "lead_time_delta_days": 2})
+    assert response.status_code == 200
+    assert response.json()["data"]["inputs"]["horizon"] == 21

@@ -58,6 +58,25 @@ test('landing, authentication and account shell are ready for backend identity i
   await expect(page.getByRole('heading', { name: 'Start with Supplydesk' })).toBeVisible()
 })
 
+test('decision cockpit compares reviews, simulates policy and grounds the daily brief', async ({
+  page,
+}) => {
+  await start(page, '03')
+  await nav(page, 'Decision cockpit')
+  await expect(page.getByRole('heading', { name: 'See the exposure. Test the policy.' })).toBeVisible()
+  await expect(page.getByText('Recommended value', { exact: true }).first()).toBeVisible()
+  await page.getByLabel('Simulation demand percent').fill('150')
+  await page.getByRole('button', { name: 'Run scenario' }).click()
+  await expect(page.getByText(/Read-only deterministic scenario/)).toBeVisible()
+  await page.screenshot({ path: 'test-results/decision-cockpit.png', fullPage: true })
+  await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+  await page.getByRole('button', { name: "Give me today's daily brief." }).click()
+  await expect(page.locator('.message.agent').last()).toContainText('SKUs reviewed')
+  await expect(page.locator('.message.agent').last()).toContainText('Recommended value')
+  await page.getByRole('button', { name: 'What changed since the last review?' }).click()
+  await expect(page.locator('.message.agent').last()).toContainText('deterministic and read-only')
+})
+
 test('normal review, explicit approval, export, critical edit and rejection', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))

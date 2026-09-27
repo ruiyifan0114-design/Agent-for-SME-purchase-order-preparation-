@@ -21,13 +21,17 @@ class MessageRequest(BaseModel):
 
 
 class Intent(BaseModel):
-    action: Literal["NONE", "RUN", "DRAFTS", "PRICE", "EXPLAIN"] = "NONE"
+    action: Literal["NONE", "RUN", "DRAFTS", "PRICE", "EXPLAIN", "BRIEF", "INSIGHTS"] = "NONE"
 
 
 def classify(message):
     text = message.lower()
     if any(w in text for w in ("approve", "reject", "批准", "审批", "拒绝", "export", "导出")):
         return "NONE", "workflow"
+    if any(w in text for w in ("daily brief", "briefing", "today", "summary", "今日", "今天", "简报", "总结")):
+        return "BRIEF", "workflow"
+    if any(w in text for w in ("compare", "change", "trend", "cockpit", "insight", "对比", "变化", "趋势", "分析")):
+        return "INSIGHTS", "workflow"
     if any(w in text for w in ("why", "explain", "为什么", "原因", "blocked", "阻塞")):
         return "EXPLAIN", "workflow"
     if re.search(r"(?:price|价格|单价).*?\d|\d.*?(?:price|价格|单价)", text):
@@ -46,7 +50,7 @@ def classify(message):
         return "NONE", "workflow"
     payload = {"model": cfg.deepseek_model, "stream": False, "max_tokens": 100,
         "messages": [
-            {"role": "system", "content": 'Classify a procurement UI command. Return only JSON {"action":"RUN|DRAFTS|PRICE|EXPLAIN|NONE"}. RUN opens setup; PRICE opens a price form; EXPLAIN shows stored evidence. Never approve/reject/export or calculate values. Such commands are NONE. Do not return any other fields.'},
+            {"role": "system", "content": 'Classify a procurement UI command. Return only JSON {"action":"RUN|DRAFTS|PRICE|EXPLAIN|BRIEF|INSIGHTS|NONE"}. BRIEF summarizes current stored work; INSIGHTS opens deterministic analytics/comparison. Never approve/reject/export or calculate values. Such commands are NONE. Do not return any other fields.'},
             {"role": "user", "content": message}], "response_format": {"type": "json_object"}}
     req = Request("https://api.deepseek.com/chat/completions", data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
@@ -84,6 +88,25 @@ def reply(tools, request: MessageRequest):
         message = "Open the daily check setup, confirm the input batch and policy, then start the check."
     elif action == "DRAFTS":
         message = "Opening supplier-grouped PO drafts from the current run. Approval remains an explicit human action."
+    elif action == "BRIEF" and request.run_id:
+        cockpit = tools.procurement_cockpit(request.run_id)
+        metrics = cockpit["metrics"]
+        changes = cockpit["comparison"]["changes"]
+        message = (f"Daily brief for {cockpit['as_of']}: {metrics['total_skus']} SKUs reviewed; "
+            f"{metrics['reorder']} ready to reorder, {metrics['no_reorder']} covered, and "
+            f"{metrics['blocked']} blocked. Recommended value is {cockpit['currency']} "
+            f"{metrics['recommendation_value']} across {metrics['supplier_count']} suppliers. "
+            f"There are {metrics['warning_count']} open timing warnings and {len(changes)} material changes versus the previous review. "
+            "Open Decision cockpit for the evidence and scenario controls.")
+    elif action == "BRIEF":
+        action, message = "NONE", "Select a procurement run first, then ask for today's daily brief."
+    elif action == "INSIGHTS" and request.run_id:
+        cockpit = tools.procurement_cockpit(request.run_id)
+        count = len(cockpit["comparison"]["changes"])
+        message = (f"Opening Decision cockpit. The current review has {count} material SKU changes versus the previous run. "
+                   "The comparison and what-if simulation are deterministic and read-only.")
+    elif action == "INSIGHTS":
+        action, message = "NONE", "Select a procurement run before opening analytics or comparing changes."
     else:
-        message = "I can prepare a daily check, explain a SKU, open a price correction, or show drafts. Use the PO review controls to approve, reject or export."
+        message = "I can prepare a daily brief, compare reviews, explain a SKU, open a price correction, start a check, or show drafts. Use the PO review controls to approve, reject or export."
     return {"action": action, "message": message, "sku_id": sku, "unit_price": price, "provider": provider}

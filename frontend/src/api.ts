@@ -4,6 +4,7 @@ import type {
   AuditEvent,
   Batch,
   Check,
+  Cockpit,
   Context,
   Credentials,
   Draft,
@@ -11,6 +12,8 @@ import type {
   Report,
   Run,
   RunRequest,
+  Simulation,
+  SimulationInput,
 } from './types'
 
 let credentials: Credentials = { service: '', reviewer: '' }
@@ -74,6 +77,8 @@ export const api = {
   results: (id: string) => request<Check[]>(`/runs/${id}/results`),
   exceptions: (id: string) => request<ExceptionItem[]>(`/runs/${id}/exceptions`),
   drafts: (id: string) => request<Draft[]>(`/runs/${id}/drafts`),
+  cockpit: (id: string) => request<Cockpit>(`/runs/${id}/cockpit`),
+  simulate: (id: string, input: SimulationInput) => post<Simulation>(`/runs/${id}/simulate`, input),
   history: (id: string) => request<ApprovalEvent[]>(`/drafts/${id}/history`),
   audit: (offset = 0) => request<AuditEvent[]>(`/audit?limit=50&offset=${offset}`),
   importJson: (data: unknown, filename = 'dataset.json') =>

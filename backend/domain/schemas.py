@@ -124,3 +124,11 @@ class Review(StrictModel):
     expected_version: Positive
     comment: Annotated[str, Field(min_length=1, max_length=2000)]
     confirm: Literal[True]
+
+
+class SimulationRequest(StrictModel):
+    """Bounded, read-only policy changes for deterministic scenario comparison."""
+    horizon: Annotated[int, Field(strict=True, ge=1, le=365)] | None = None
+    demand_percent: Annotated[int, Field(strict=True, ge=50, le=200)] = 100
+    safety_stock_percent: Annotated[int, Field(strict=True, ge=50, le=200)] = 100
+    lead_time_delta_days: Annotated[int, Field(strict=True, ge=-30, le=90)] = 0

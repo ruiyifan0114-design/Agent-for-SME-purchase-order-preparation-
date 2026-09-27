@@ -6,7 +6,7 @@ from backend.agent.procurement import ProcurementAgent
 from backend.agent.messages import MessageRequest
 from backend.api.dependencies import tools
 from backend.domain.intake import MAX_BYTES
-from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest
+from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest, SimulationRequest
 from backend.skills.workflows import Approval, ExceptionResolution
 from backend.tools.runtime import BusinessError
 
@@ -114,6 +114,16 @@ def draft(draft_id: str, t=Depends(tools)):
 @router.get("/runs/{run_id}/drafts", response_model=Envelope)
 def list_drafts(run_id: str, t=Depends(tools)):
     return ok(t.list_po_drafts(run_id))
+
+
+@router.get("/runs/{run_id}/cockpit", response_model=Envelope)
+def cockpit(run_id: str, t=Depends(tools)):
+    return ok(t.procurement_cockpit(run_id))
+
+
+@router.post("/runs/{run_id}/simulate", response_model=Envelope)
+def simulate(run_id: str, request: SimulationRequest, t=Depends(tools)):
+    return ok(t.simulate_procurement(run_id, request))
 
 
 @router.patch("/drafts/{draft_id}/lines/{line_id}", response_model=Envelope)

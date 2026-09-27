@@ -4,6 +4,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   CheckCheck,
+  ChartNoAxesCombined,
   ChevronDown,
   Clock3,
   FileSpreadsheet,
@@ -15,10 +16,12 @@ import {
   Play,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Truck,
   UploadCloud,
 } from 'lucide-react'
+import { api } from './api'
 import {
   Badge,
   Button,
@@ -36,14 +39,18 @@ import type {
   AuditEvent,
   Batch,
   Check,
+  Cockpit,
+  DecisionMetrics,
   Draft,
   ExceptionItem,
   Line,
   Run,
+  Simulation,
   Status,
 } from './types'
 
-export type Screen = 'dashboard' | 'data' | 'skus' | 'exceptions' | 'drafts' | 'audit'
+export type Screen =
+  'dashboard' | 'intelligence' | 'data' | 'skus' | 'exceptions' | 'drafts' | 'audit'
 export function Dashboard({
   run,
   results,
@@ -311,6 +318,267 @@ export function Dashboard({
             : 'Your original source data stays intact'}
         </span>
       </div>
+    </>
+  )
+}
+
+function MetricDelta({
+  baseline,
+  scenario,
+  currency,
+}: {
+  baseline: DecisionMetrics
+  scenario: DecisionMetrics
+  currency: string
+}) {
+  const rows = [
+    [
+      'Recommended value',
+      `${currency} ${money(baseline.recommendation_value)}`,
+      `${currency} ${money(scenario.recommendation_value)}`,
+    ],
+    ['Reorder SKUs', String(baseline.reorder), String(scenario.reorder)],
+    ['Blocked SKUs', String(baseline.blocked), String(scenario.blocked)],
+    ['Timing warnings', String(baseline.warning_count), String(scenario.warning_count)],
+  ]
+  return (
+    <div className="simulation-comparison">
+      {rows.map(([label, before, after]) => (
+        <div key={label}>
+          <span>{label}</span>
+          <small>
+            Current<strong>{before}</strong>
+          </small>
+          <ArrowRight size={15} />
+          <small>
+            Scenario<strong>{after}</strong>
+          </small>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function CockpitScreen({ run, cockpit }: { run: Run | null; cockpit: Cockpit | null }) {
+  const [horizon, setHorizon] = useState(run?.horizon || 14)
+  const [demand, setDemand] = useState(100)
+  const [safety, setSafety] = useState(100)
+  const [lead, setLead] = useState(0)
+  const [simulation, setSimulation] = useState<Simulation | null>(null)
+  const [working, setWorking] = useState(false)
+  const [failure, setFailure] = useState('')
+  if (!run || !cockpit)
+    return (
+      <Empty title="No decision cockpit yet">
+        Complete or open a procurement review to see management insights and run a scenario.
+      </Empty>
+    )
+  const metrics = cockpit.metrics
+  const maxSpend = Math.max(...metrics.spend_by_supplier.map((item) => Number(item.value)), 1)
+  async function simulate() {
+    setWorking(true)
+    setFailure('')
+    try {
+      setSimulation(
+        await api.simulate(run!.id, {
+          horizon,
+          demand_percent: demand,
+          safety_stock_percent: safety,
+          lead_time_delta_days: lead,
+        }),
+      )
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : 'Scenario could not be evaluated.')
+    } finally {
+      setWorking(false)
+    }
+  }
+  return (
+    <>
+      <SectionTitle
+        eyebrow="MANAGEMENT DECISION COCKPIT"
+        title="See the exposure. Test the policy."
+        description="Live procurement value, approval readiness, review-to-review changes and read-only deterministic scenarios."
+      />
+      <div className="cockpit-kpis">
+        <div>
+          <span>Recommended value</span>
+          <strong>
+            {cockpit.currency} {money(metrics.recommendation_value)}
+          </strong>
+          <small>
+            {metrics.reorder} SKUs across {metrics.supplier_count} suppliers
+          </small>
+        </div>
+        <div>
+          <span>Decision completion</span>
+          <strong>{metrics.decision_completion}%</strong>
+          <small>
+            {metrics.blocked} blocked · {metrics.warning_count} timing warnings
+          </small>
+        </div>
+        <div>
+          <span>Approved value</span>
+          <strong>
+            {cockpit.currency} {money(metrics.approved_value || '0')}
+          </strong>
+          <small>{metrics.approval_progress || 0}% of supplier drafts approved</small>
+        </div>
+        <div>
+          <span>Material changes</span>
+          <strong>{cockpit.comparison.changes.length.toString().padStart(2, '0')}</strong>
+          <small>
+            {cockpit.comparison.previous_run_id
+              ? 'Versus the previous stored review'
+              : 'No earlier review available'}
+          </small>
+        </div>
+      </div>
+      <div className="cockpit-grid">
+        <section className="panel spend-panel">
+          <PanelHead
+            title="Recommended spend by supplier"
+            note="Pre-tax value from stored deterministic recommendations."
+          />
+          <div className="spend-bars">
+            {metrics.spend_by_supplier.map((item) => (
+              <div key={item.supplier_id}>
+                <span>{item.supplier_id}</span>
+                <div>
+                  <i style={{ width: `${(Number(item.value) / maxSpend) * 100}%` }} />
+                </div>
+                <strong>
+                  {cockpit.currency} {money(item.value)}
+                </strong>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="panel change-panel">
+          <PanelHead
+            title="What changed"
+            note={
+              cockpit.comparison.previous_run_id
+                ? `Compared with RUN-${shortId(cockpit.comparison.previous_run_id)}`
+                : 'Run another review to enable comparison.'
+            }
+          />
+          <div className="change-list">
+            {cockpit.comparison.changes.slice(0, 6).map((change) => (
+              <div key={change.sku_id}>
+                <strong>{change.sku_id}</strong>
+                <span>
+                  <Badge status={change.before_status} />
+                  <ArrowRight size={13} />
+                  <Badge status={change.after_status} />
+                </span>
+                <small>
+                  {number(change.before_qty)} → {number(change.after_qty)} units
+                </small>
+              </div>
+            ))}
+            {!cockpit.comparison.changes.length && (
+              <Empty title="No material changes">
+                Statuses and recommended quantities match the previous stored review.
+              </Empty>
+            )}
+          </div>
+        </section>
+      </div>
+      <section className="panel simulation-panel">
+        <PanelHead
+          title="What-if policy simulator"
+          note="Changes are evaluated in memory. Source data, drafts and approvals remain untouched."
+          action={
+            <span className="simulation-safe">
+              <ShieldCheck size={14} /> READ ONLY
+            </span>
+          }
+        />
+        <div className="simulation-layout">
+          <div className="simulation-controls">
+            <label>
+              Planning horizon <strong>{horizon} days</strong>
+              <input
+                aria-label="Simulation planning horizon"
+                type="range"
+                min="1"
+                max="60"
+                value={horizon}
+                onChange={(e) => setHorizon(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Demand assumption <strong>{demand}%</strong>
+              <input
+                aria-label="Simulation demand percent"
+                type="range"
+                min="50"
+                max="200"
+                step="5"
+                value={demand}
+                onChange={(e) => setDemand(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Stock policy <strong>{safety}%</strong>
+              <input
+                aria-label="Simulation stock policy percent"
+                type="range"
+                min="50"
+                max="200"
+                step="5"
+                value={safety}
+                onChange={(e) => setSafety(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Supplier lead-time shift{' '}
+              <strong>
+                {lead >= 0 ? '+' : ''}
+                {lead} days
+              </strong>
+              <input
+                aria-label="Simulation lead time delta"
+                type="range"
+                min="-10"
+                max="30"
+                value={lead}
+                onChange={(e) => setLead(Number(e.target.value))}
+              />
+            </label>
+            <Button onClick={() => void simulate()} disabled={working}>
+              <SlidersHorizontal size={15} />
+              {working ? 'Evaluating scenario…' : 'Run scenario'}
+            </Button>
+            {failure && <p className="orange-text">{failure}</p>}
+          </div>
+          <div className="simulation-result">
+            {simulation ? (
+              <>
+                <MetricDelta
+                  baseline={simulation.baseline}
+                  scenario={simulation.scenario}
+                  currency={cockpit.currency}
+                />
+                <p>
+                  <ShieldCheck size={14} />
+                  {simulation.disclaimer}
+                </p>
+              </>
+            ) : (
+              <div className="simulation-empty">
+                <ChartNoAxesCombined size={28} />
+                <h3>Test assumptions without changing the plan</h3>
+                <p>
+                  Adjust demand, stock policy, horizon or lead time, then compare the outcome with
+                  the current review.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
     </>
   )
 }
