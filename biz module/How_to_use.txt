@@ -1,0 +1,49 @@
+BIZ MODULE — HOW TO USE
+
+Purpose
+-------
+This package is the Biz-owned specification for the SME procurement Agent project.
+
+Important rule
+--------------
+Unknown company-specific values are NOT treated as facts.
+- Confirmed team-scope items are labelled as confirmed.
+- External concepts are linked to original authoritative documentation.
+- Synthetic test data is explicitly labelled as synthetic.
+- Missing project decisions are left as TBD / Open Question.
+
+Recommended sequence
+--------------------
+1. Open Biz_Module_Master.xlsx → "Confirmed Scope".
+2. Open "Open Questions" and assign/resolve each unknown.
+3. Review "Source Registry" to see which design concepts are externally grounded.
+4. Biz freezes "PO Field Dictionary", "Commercial Rules", "Approval Controls", and "Commercial Exceptions".
+5. Biz + Physics fill supplier/SKU commercial values only after deciding the synthetic dataset.
+6. CS implements the schemas and controls.
+7. Biz/BA run "Biz UAT" and record actual results.
+8. Freeze the workbook before final evaluation/demo.
+
+What each CSV is for
+--------------------
+supplier_master_template.csv
+  Machine-readable supplier header/master schema for CS ingestion.
+
+sku_supplier_map_template.csv
+  Machine-readable SKU-to-supplier commercial schema used by CS for PO preparation.
+
+procurement_rules.csv
+  Structured handoff of Biz rules; CS implements, Physics reviews quantity-related parts.
+
+approval_controls.csv
+  Approval-gate and change-control checklist; CS turns this into validations/state transitions.
+
+biz_uat_test_cases.csv
+  Biz-owned acceptance tests; BA/CS execute against the application and record evidence.
+
+What should NOT be inferred
+---------------------------
+- The workbook does not set the actual currency.
+- It does not claim any real supplier price, MOQ, pack size or lead time.
+- It does not define tax/GST treatment.
+- It does not define an approval amount threshold.
+- It does not claim the cited Oracle/SAP/Microsoft behavior is a competition requirement.

@@ -1,0 +1,17 @@
+.venv
+.python
+.uv-cache
+.git
+.env
+__pycache__
+.pytest_cache
+*.db
+.deepeval
+.dist
+deepseek_api_key.txt
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+.npm-cache
+.runtime

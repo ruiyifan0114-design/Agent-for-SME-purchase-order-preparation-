@@ -1,0 +1,13 @@
+﻿control_id,check,if_failed,implementation_owner,rule_reference
+AC-01,Supplier exists and is approved/default for SKU,Block approval,Biz data + CS enforcement,BR-01
+AC-02,Unit price exists and is > 0,Block PO completion/approval,Biz data + CS enforcement,BR-04
+AC-03,Quantity is positive whole number,Block approval,Physics output + CS validation,BR-05/06
+AC-04,MOQ satisfied when MOQ is defined,Block approval,Physics + CS,BR-05
+AC-05,Pack/fixed lot multiple satisfied when defined,Block approval,Physics + CS,BR-06
+AC-06,Line Amount recomputes from Qty × Unit Price,Block approval if mismatch,CS deterministic calculation,BR-11
+AC-07,PO Total equals sum of line amounts,Block approval if mismatch,CS deterministic calculation,BR-11
+AC-08,No unresolved blocking commercial exception on included lines,Block approval,CS exception state,BR-03/04
+AC-09,Reviewer identity captured,Required for Approved,CS audit log,BR-09
+AC-10,Approval timestamp captured,Required for Approved,CS audit log,BR-09
+AC-11,Supplier/Qty/Unit Price edit after approval,Reset to Needs Review,CS state management,BR-10
+AC-12,Same run + same supplier draft requested again,Do not create a second active draft,CS idempotency control,TECHNICAL CONTROL

@@ -1,0 +1,324 @@
+{
+  "sku_master": [
+    {
+      "sku_id": "SKU-001",
+      "description": "Ballpoint Pen - Black",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-002",
+      "description": "Ballpoint Pen - Blue",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-003",
+      "description": "A4 Copy Paper",
+      "uom": "ream",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-004",
+      "description": "Lever Arch File",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-005",
+      "description": "Desktop Stapler",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-006",
+      "description": "Staples Box",
+      "uom": "box",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-007",
+      "description": "A5 Notebook",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-008",
+      "description": "Permanent Marker",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-009",
+      "description": "Clear Adhesive Tape",
+      "uom": "roll",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    },
+    {
+      "sku_id": "SKU-010",
+      "description": "C5 Envelope",
+      "uom": "pcs",
+      "active": true,
+      "safety_stock": 20,
+      "target_stock": 60
+    }
+  ],
+  "supplier_master": [
+    {
+      "supplier_id": "SUP-A",
+      "supplier_name": "Synthetic Supplier A",
+      "approved": true,
+      "currency": "XTS"
+    },
+    {
+      "supplier_id": "SUP-B",
+      "supplier_name": "Synthetic Supplier B",
+      "approved": true,
+      "currency": "XTS"
+    },
+    {
+      "supplier_id": "SUP-C",
+      "supplier_name": "Synthetic Supplier C",
+      "approved": true,
+      "currency": "XTS"
+    }
+  ],
+  "supplier_sku": [
+    {
+      "sku_id": "SKU-001",
+      "supplier_id": "SUP-A",
+      "approved_for_sku": true,
+      "unit_price": "1",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-002",
+      "supplier_id": "SUP-B",
+      "approved_for_sku": true,
+      "unit_price": "2",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-003",
+      "supplier_id": "SUP-C",
+      "approved_for_sku": true,
+      "unit_price": "3",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-004",
+      "supplier_id": "SUP-A",
+      "approved_for_sku": true,
+      "unit_price": "TEAM TO DEFINE",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-005",
+      "supplier_id": "SUP-B",
+      "approved_for_sku": true,
+      "unit_price": "5",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-006",
+      "supplier_id": "SUP-C",
+      "approved_for_sku": false,
+      "unit_price": "6",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-007",
+      "supplier_id": "SUP-A",
+      "approved_for_sku": true,
+      "unit_price": "7",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-008",
+      "supplier_id": "SUP-B",
+      "approved_for_sku": true,
+      "unit_price": "8",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-009",
+      "supplier_id": "SUP-C",
+      "approved_for_sku": true,
+      "unit_price": "9",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-010",
+      "supplier_id": "SUP-A",
+      "approved_for_sku": true,
+      "unit_price": "10",
+      "currency": "XTS",
+      "moq": 50,
+      "pack_multiple": 10,
+      "lead_time_days": 2,
+      "updated_at": "2026-09-27"
+    }
+  ],
+  "inventory_snapshot": [
+    {
+      "sku_id": "SKU-001",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-002",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-003",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-004",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-006",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-007",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-008",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-009",
+      "on_hand": 10,
+      "snapshot_date": "2026-09-27"
+    },
+    {
+      "sku_id": "SKU-010",
+      "on_hand": 100,
+      "snapshot_date": "2026-09-27"
+    }
+  ],
+  "demand": [
+    {
+      "sku_id": "SKU-001",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-002",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-003",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-004",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-005",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-006",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-007",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-008",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-009",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    },
+    {
+      "sku_id": "SKU-010",
+      "quantity": 30,
+      "need_date": "2026-09-30"
+    }
+  ],
+  "open_po": [
+    {
+      "sku_id": "SKU-007",
+      "po_number": "SYNTHETIC-OPEN-001",
+      "quantity": 100,
+      "arrival_date": "2026-10-05",
+      "status": "OPEN"
+    }
+  ]
+}

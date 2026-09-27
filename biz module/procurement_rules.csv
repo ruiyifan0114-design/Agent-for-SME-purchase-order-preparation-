@@ -1,0 +1,13 @@
+﻿rule_id,rule,requirement,basis,source,important_qualification
+BR-01,Approved supplier relation,Only the SKU's approved/default supplier may be used in MVP.,Grounded concept + project simplification,SRC-01,Default-supplier-only is a prototype choice.
+BR-02,No automatic supplier optimization,The Agent does not compare suppliers or switch suppliers automatically.,Confirmed project scope,TEAM BRIEF,Out of MVP.
+BR-03,Missing supplier mapping,"If a reorder SKU has no default/qualified supplier record, mark the SKU commercial decision as BLOCKED / Needs Attention.",Project control,TEAM BRIEF,Do not guess a supplier.
+BR-04,Missing price,"If unit price is missing/invalid, do not fabricate it; create a blocking exception for PO preparation.",Project control,TEAM BRIEF + SRC-02,"This is a chosen control, not a universal ERP rule."
+BR-05,MOQ,"If supplier-item MOQ is defined, final order quantity must respect it.",Grounded attribute + project calculation,SRC-06,Physics defines formula/standard answer.
+BR-06,Pack / lot multiple,"If a supplier-item fixed lot multiple is defined, order quantity must respect it.",Grounded attribute + project calculation,SRC-06,Physics defines rounding formula/standard answer.
+BR-07,Supplier lead time,Lead time can be held as supplier-item data and used for explainability/feasibility checks.,Grounded field,SRC-06,Exact values are synthetic/TBD.
+BR-08,Consolidate by supplier,Valid reorder lines mapped to the same supplier are grouped into one PO draft for the run.,Project design,TEAM BRIEF,No claim this is mandatory practice.
+BR-09,Human approval before finalization,"Agent may prepare a draft, but final save/export as approved order requires human approval.",Confirmed scope + grounded workflow concept,TEAM BRIEF + SRC-03 + SRC-04,
+BR-10,Critical edit invalidates approval,"If supplier, quantity, or unit price changes after approval, status resets to Needs Review.",Project control grounded by workflow concept,SRC-05,Specific critical fields are a project design choice.
+BR-11,PO amount calculation,Line Amount = Quantity × Unit Price; PO Total = sum of line amounts.,Project deterministic calculation,SRC-02,Tax excluded unless team later defines tax treatment.
+BR-12,Source traceability,Each PO line keeps the source/replenishment decision reference used to prepare it.,Project auditability control,TEAM BRIEF,

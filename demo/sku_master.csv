@@ -1,0 +1,11 @@
+sku_id,description,uom,active,safety_stock,target_stock
+SKU-001,Ballpoint Pen - Black,pcs,True,20,60
+SKU-002,Ballpoint Pen - Blue,pcs,True,20,60
+SKU-003,A4 Copy Paper,ream,True,20,60
+SKU-004,Lever Arch File,pcs,True,20,60
+SKU-005,Desktop Stapler,pcs,True,20,60
+SKU-006,Staples Box,box,True,20,60
+SKU-007,A5 Notebook,pcs,True,20,60
+SKU-008,Permanent Marker,pcs,True,20,60
+SKU-009,Clear Adhesive Tape,roll,True,20,60
+SKU-010,C5 Envelope,pcs,True,20,60

@@ -1,0 +1,11 @@
+﻿test_id,scenario,input_setup,expected_result,type,evidence_note
+BIZ-UAT-01,Valid commercial data,Approved supplier; price present; Qty valid,PO line can be prepared; awaits human approval,Normal,No company-specific values assumed
+BIZ-UAT-02,Missing price,Reorder required; supplier mapping exists; price blank,EX-C03; PO line is not completed; Agent asks for price,Exception,Matches team brief
+BIZ-UAT-03,Supplier not approved,Reorder required; supplier record Approved=No,EX-C02; approval blocked,Exception,Uses approved-supplier concept
+BIZ-UAT-04,MOQ control,Test fixture: raw requirement 36; MOQ 50; pack multiple 10,Final order quantity expected 50,Calculation fixture,Artificial test values only; Physics should own final formula
+BIZ-UAT-05,Pack multiple control,Test fixture: raw requirement 63; MOQ 50; pack multiple 10,Final order quantity expected 70,Calculation fixture,Artificial test values only; Physics should own final formula
+BIZ-UAT-06,Critical edit after approval,Approved draft; change supplier or quantity or unit price,Status resets to Needs Review,Control,Project control supported by SAP workflow concept
+BIZ-UAT-07,Duplicate draft request,Same run and same supplier draft-generation action repeated,Only one active draft remains,Control,Technical idempotency requirement
+BIZ-UAT-08,"Same supplier, multiple reorder lines",Multiple valid SKU decisions map to one supplier,One supplier PO draft contains all valid lines,Consolidation,Project design from team brief
+BIZ-UAT-09,Line amount mismatch,Displayed line amount differs from Qty × Unit Price,Recalculate; approval blocked until consistent,Control,Deterministic calculation
+BIZ-UAT-10,Blocked SKU does not disappear,One SKU lacks commercial data while others are valid,Blocked SKU stays in exception list; valid SKUs can continue only if team confirms partial-progress rule,Workflow,Q-14 remains team decision

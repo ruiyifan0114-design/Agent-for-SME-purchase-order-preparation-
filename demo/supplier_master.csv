@@ -1,0 +1,4 @@
+supplier_id,supplier_name,approved,currency
+SUP-A,Synthetic Supplier A,True,XTS
+SUP-B,Synthetic Supplier B,True,XTS
+SUP-C,Synthetic Supplier C,True,XTS

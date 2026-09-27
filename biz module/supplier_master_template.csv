@@ -1,0 +1,4 @@
+﻿supplier_id,supplier_name,approved,currency,commercial_data_status,data_status
+SUP-A,Synthetic Supplier A,Yes,,TEAM TO DEFINE,SYNTHETIC IDENTIFIER ONLY
+SUP-B,Synthetic Supplier B,Yes,,TEAM TO DEFINE,SYNTHETIC IDENTIFIER ONLY
+SUP-C,Synthetic Supplier C,Yes,,TEAM TO DEFINE,SYNTHETIC IDENTIFIER ONLY
