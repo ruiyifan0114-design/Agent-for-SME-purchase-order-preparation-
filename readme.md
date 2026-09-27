@@ -1,41 +1,41 @@
 # Supplydesk — SME Procurement Agent
 
-Supplydesk 是一个面向中小企业采购团队的可审计采购准备 Agent。它把分散的库存、需求、在途订单、供应商和价格数据汇总到一个工作区，逐一检查所有 SKU，计算补货建议，生成按供应商分组的采购单草稿，并把最终批准权留给采购人员。
+Supplydesk is an auditable procurement-preparation agent designed for small and medium-sized enterprise (SME) procurement teams. It consolidates fragmented inventory, demand, open purchase orders, supplier, and pricing data into a single workspace, checks each SKU individually, calculates replenishment recommendations, generates supplier-grouped purchase order drafts, and keeps final approval in the hands of procurement staff.
 
-项目针对的是日常采购准备中最耗时、也最容易出错的一段流程：手工拼接表格、漏看早期缺货、使用过期价格、误选未批准供应商，以及无法解释订单数量如何得出。Supplydesk 让 Agent 负责整理、计算和追踪，让人负责异常判断和采购承诺。
+The project targets one of the most time-consuming and error-prone parts of daily procurement preparation: manually combining spreadsheets, overlooking early stockouts, using outdated prices, selecting unapproved suppliers, and being unable to explain how order quantities were calculated. Supplydesk lets the Agent handle data organization, calculations, and tracking, while procurement staff remain responsible for exception handling and final purchasing commitments.
 
-> 当前版本是单仓库、单币种、单审核人的 MVP。仓库中的公司、商品、金额和订单均为合成演示数据；系统不会连接真实 ERP、联系供应商或自动发出采购订单。
+> The current version is a single-warehouse, single-currency, single-reviewer MVP. All companies, products, amounts, and orders in the repository are synthetic demo data. The system does not connect to a real ERP, contact suppliers, or automatically issue purchase orders.
 
-## 核心功能
+## Core Features
 
-### 1. 多源采购数据导入与校验
+### 1. Multi-Source Procurement Data Import and Validation
 
-系统支持六份 CSV、六个工作表的 Excel 文件或 JSON 数据，覆盖：
+The system supports six CSV files, an Excel workbook with six worksheets, or JSON data covering:
 
-- SKU 主数据和安全库存策略
-- 供应商主数据
-- SKU 与默认供应商的商业映射
-- 库存快照
-- 未来及逾期未履行需求
-- 未收货采购订单
+- SKU master data and safety stock policies
+- Supplier master data
+- Commercial mapping between SKUs and default suppliers
+- Inventory snapshots
+- Future and overdue open demand
+- Open purchase orders not yet received
 
-导入时会检查缺表、重复主键、未知 SKU、非法日期、无效数量、占位文本和冲突库存。结构错误的批次会被保存为 `REJECTED` 并展示具体问题，不会被当成“零库存”或“零需求”继续计算。
+During import, the system checks for missing tables, duplicate primary keys, unknown SKUs, invalid dates, invalid quantities, placeholder text, and conflicting inventory data. Batches with structural errors are saved as `REJECTED` and display the specific issues. They are not treated as “zero inventory” or “zero demand” and passed into further calculations.
 
-### 2. 全量 SKU 补货检查
+### 2. Full-SKU Replenishment Check
 
-每次运行都为每个有效 SKU 建立结果，因此未检查、已判断和被阻塞的商品都可见。最终状态只有三种：
+Each run creates a result for every valid SKU, ensuring that unchecked, evaluated, and blocked items are all visible. There are only three final statuses:
 
-| 状态 | 含义 |
+| Status | Meaning |
 | --- | --- |
-| `REORDER` | 预测库存低于安全库存，数据完整，可以生成补货建议 |
-| `NO_REORDER` | 检查周期内的库存水位满足安全库存，无需下单 |
-| `BLOCKED` | 缺少或冲突的数据使系统无法可靠判断，需要人工修正 |
+| `REORDER` | Projected inventory falls below the safety stock level, and the data is complete, allowing a replenishment recommendation to be generated. |
+| `NO_REORDER` | Inventory levels remain at or above the safety stock level throughout the review period, so no order is required. |
+| `BLOCKED` | Missing or conflicting data prevents the system from making a reliable decision and requires manual correction. |
 
-界面分别显示“扫描覆盖率”和“决策完成率”。即使部分 SKU 被阻塞，其余 SKU 仍可继续处理，而阻塞项不会进入采购单草稿。
+The interface separately displays **Scan Coverage** and **Decision Completion Rate**. Even if some SKUs are blocked, the remaining SKUs can continue to be processed, while blocked items are excluded from purchase order drafts.
 
-### 3. 可解释的确定性采购计算
+### 3. Explainable Deterministic Procurement Calculation
 
-采购数量由纯业务规则计算，语言模型不参与数量、日期或金额运算。系统在每个需求日期以及检查周期终点建立库存检查点：
+Procurement quantities are calculated entirely using deterministic business rules. The language model is not involved in quantity, date, or monetary calculations. The system creates inventory checkpoints at each demand date and at the end of the review period:
 
 ```text
 projected_stock(day)
@@ -43,108 +43,107 @@ projected_stock(day)
   + open_po_arriving_on_or_before(day)
   - demand_due_on_or_before(day)
 
-binding_point = 检查周期内 projected_stock 最低的日期
+binding_point = Within the review period projected_stock The date with the lowest projected stock level
 
-若 binding_point.projected_stock < safety_stock：
+if binding_point.projected_stock < safety_stock：
   raw_order_qty = target_stock - projected_stock
-  final_order_qty = 按 MOQ 和包装倍数向上取整
-否则：
+  final_order_qty = Round up according to the MOQ and pack-size multiple.
+then：
   NO_REORDER
 ```
 
-这种按日期计算的方式能够保留短期缺口：晚到的在途订单不会掩盖此前已经发生的缺货。每个结果都保存时间线、关键日期、库存、需求、在途、供应商、价格、MOQ、包装倍数和交期证据，用户可以追溯最终建议。
+This date-based calculation approach preserves short-term inventory gaps: late incoming purchase orders cannot hide stockouts that occur earlier. Each result stores the timeline, key dates, inventory levels, demand, incoming orders, supplier, price, MOQ, pack-size multiples, and lead-time evidence, allowing users to trace how the final recommendation was generated.
 
-### 4. 异常修正与局部重算
+### 4. Exception Resolution and Partial Recalculation
 
-缺少库存、缺少价格、默认供应商缺失、供应商未批准、币种不一致、数据过期和冲突快照等问题会形成明确的异常任务。采购人员可以在表单中修正指定运行下的业务上下文，系统只重算受影响的 SKU，并保留原始导入数据和修订历史。
+Issues such as missing inventory, missing prices, missing default suppliers, unapproved suppliers, currency mismatches, stale data, and conflicting inventory snapshots are turned into explicit exception tasks. Procurement staff can correct the business context for a specific run through a form, after which the system recalculates only the affected SKUs while preserving the original imported data and the full revision history.
 
-交期风险和晚到在途订单作为警告展示；会破坏决策可靠性的缺失或冲突数据则阻止生成订单行。
+Lead-time risks and late incoming purchase orders are displayed as warnings, while missing or conflicting data that would compromise decision reliability prevents purchase order lines from being generated.
 
-### 5. 采购单草稿与人工审批
+### 5. Purchase Order Drafting and Human Approval
 
-所有 `REORDER` 结果按供应商自动归并为采购单草稿。审核人可以检查来源证据、编辑数量和价格、批准或拒绝草稿，并在批准后导出 CSV。
+All `REORDER` results are automatically grouped by supplier into purchase order drafts. Reviewers can inspect the supporting evidence, edit quantities and prices, approve or reject drafts, and export them as CSV files after approval.
 
-审批具有明确的安全边界：
+The approval process has clear safety boundaries:
 
-- Agent 和服务凭证不能批准采购单
-- 批准必须由审核人显式勾选确认并填写意见
-- 审批使用版本号校验，避免在旧页面上批准已经变化的草稿
-- 数量、价格、供应商来源或计算结果发生关键变化后，已有审批自动失效并回到 `NEEDS_REVIEW`
-- 只有处于 `APPROVED` 状态的草稿能够导出
+- The Agent and service credentials cannot approve purchase orders.
+- Approval requires the reviewer to explicitly confirm the action and provide a comment.
+- Version checks are used during approval to prevent an outdated page from approving a draft that has already changed.
+- If there are critical changes to quantities, prices, supplier sources, or calculation results, any existing approval is automatically invalidated and the draft returns to `NEEDS_REVIEW`.
+- Only drafts with `APPROVED` status can be exported.
 
-### 6. Agent 解释与完整审计
+### 6. Agent Explanations and Complete Audit Trail
 
-右侧 Agent 面板可以解释已保存的判断、定位异常，并根据用户输入打开相应的修正表单。DeepSeek 只用于可选的自然语言意图识别；即使未配置模型，采购计算、异常判断和审批流程仍能完整运行。
+The Agent panel on the right can explain saved decisions, identify exceptions, and open the relevant correction forms based on user input. DeepSeek is used only for optional natural-language intent recognition. Even without a configured model, procurement calculations, exception handling, and approval workflows remain fully functional.
 
-导入、检查、修正、草稿生成、编辑、批准、拒绝和导出都会写入 PostgreSQL 审计记录。运行上下文会被冻结，后续导入不会悄悄改变历史结论。
+Imports, checks, corrections, draft generation, edits, approvals, rejections, and exports are all recorded in the PostgreSQL audit log. The run context is frozen, ensuring that later imports cannot silently alter historical decisions.
 
-### 7. Decision Cockpit 与 What-if 模拟
+### 7. Decision Cockpit and What-If Simulation
 
-管理驾驶舱汇总建议采购金额、决策完成率、已批准金额、供应商支出和相对上一运行的状态/数量变化。用户可调整需求比例、安全/目标库存比例、检查周期及供应商交期，执行只读情景模拟。模拟复用同一个确定性领域引擎，不改写来源、正式运行、PO 草稿或审批。
+The management dashboard summarizes recommended procurement value, decision completion rate, approved value, supplier spend, and status or quantity changes compared with the previous run. Users can adjust demand ratios, safety and target stock ratios, review horizons, and supplier lead times to run read-only scenario simulations. The simulation reuses the same deterministic domain engine and does not modify source data, official runs, PO drafts, or approvals.
 
-Agent 支持基于当前数据库状态生成 Daily Brief，并可解释与上一运行之间的实质变化。DeepSeek 仍只负责可选意图分类；简报中的数量和金额由后端已存结果计算。
+The Agent can generate a Daily Brief based on the current database state and explain material changes compared with the previous run. DeepSeek remains responsible only for optional intent classification; all quantities and monetary values in the brief are calculated from results already stored by the backend.
 
-## 工作流程
+## Workflow
 
 ```mermaid
 flowchart LR
-    A[CSV / Excel / JSON] --> B[结构与业务校验]
-    B -->|结构错误| C[Rejected batch]
-    B -->|可运行| D[全量 SKU 检查]
-    D --> E[NO_REORDER]
-    D --> F[BLOCKED 异常]
-    F --> G[人工修正与局部重算]
-    G --> D
-    D --> H[REORDER]
-    H --> I[按供应商生成 PO 草稿]
-    I --> J[人工审核]
-    J -->|修改| I
-    J -->|拒绝| K[Rejected draft]
-    J -->|批准| L[Approved CSV export]
+    A[CSV / Excel / JSON] --> B[Structural and Business Validation]  
+    B -->|Structural Error| C[Rejected Batch]  
+    B -->|Runnable| D[Full SKU Check]  
+    D --> E[NO_REORDER]  
+    D --> F[BLOCKED Exception]  
+    F --> G[Manual Correction and Partial Recalculation]  
+    G --> D  
+    D --> H[REORDER]  
+    H --> I[Generate PO Drafts by Supplier]  
+    I --> J[Human Review]  
+    J -->|Edit| I  
+    J -->|Reject| K[Rejected Draft]  
+    J -->|Approve| L[Approved CSV Export]
 ```
 
-## 设计原则
+## Design Principles
 
-**确定性优先。** 影响采购承诺的计算全部位于独立领域引擎中，相同输入得到相同结果，方便测试、复核和替换业务政策。
+**Deterministic First.** All calculations that affect procurement commitments are handled by an independent domain engine. The same inputs always produce the same outputs, making it easier to test, review, and update business policies.
 
-**异常不静默。** 系统不会猜测缺失价格、库存、MOQ 或供应商批准状态。无法可靠判断时返回 `BLOCKED`，同时继续处理不受影响的 SKU。
+**Exceptions Are Never Silent.** The system does not guess missing prices, inventory levels, MOQ values, or supplier approval status. If a reliable decision cannot be made, the SKU is marked as `BLOCKED`, while unaffected SKUs continue to be processed.
 
-**人在关键回路中。** Agent 可以准备和解释，不能替采购人员批准订单。所有关键修改都会触发重新审核。
+**Humans Remain in the Critical Decision Loop.** The Agent can prepare and explain procurement actions, but it cannot approve orders on behalf of procurement staff. Any critical changes will trigger a new review.
+**Persisted State Is the Source of Truth.** Both the frontend and the Agent read runs, evidence, draft versions, and audit events directly from the database. They do not claim that an operation has succeeded based solely on chat context.
 
-**存储状态是真实来源。** 前端和 Agent 都读取数据库中的运行、证据、草稿版本与审计事件，不凭聊天上下文声称操作成功。
+**Recoverable and Duplicate-Safe.** After an interruption, the check resumes within the same run. Row-level locks, unique constraints, result revision numbers, and draft versions work together to prevent duplicate order lines and stale approvals.
 
-**可恢复且防重复。** 中断后的检查会继续同一个运行；行锁、唯一约束、结果修订号和草稿版本共同防止重复订单行及过期审批。
+## System Architecture
 
-## 系统架构
-
-| 层 | 技术与职责 |
+| Layer | Technology and Responsibilities |
 | --- | --- |
-| Web 应用 | React 19、TypeScript、Vite；概览、导入、SKU、异常、PO 和审计六个页面 |
-| API | FastAPI；认证、输入验证、统一错误响应和静态前端托管 |
-| Agent | 可恢复的工作流编排；读取存储状态并选择下一步动作 |
-| 领域引擎 | Python、Pydantic、Decimal；确定性库存与补货计算 |
-| 数据层 | PostgreSQL、SQLAlchemy、Alembic；14 张业务表、事务、锁和审计 |
-| 可选模型 | DeepSeek；仅解析自然语言意图，不计算或审批 |
+| Web Application | React 19、TypeScript、Vite；Six pages: Overview, Import, SKU, Exceptions, Purchase Orders (PO), and Audit. |
+| API | FastAPI；Authentication, input validation, standardized error responses, and static frontend hosting. |
+| Agent | Recoverable workflow orchestration; reads persisted state and determines the next action. |
+| Domain Engine | Python、Pydantic、Decimal； |
+| Data Layer | PostgreSQL、SQLAlchemy、Alembic；14 business tables, transactions, locks, and audit records. |
+| Optional Model | DeepSeek；Only parses natural-language intent; it does not perform calculations or approvals. |
 
 ```text
-frontend/          React 前端与 Playwright 浏览器测试
-backend/api/       REST API 与身份边界
-backend/agent/     Agent 编排和自然语言入口
-backend/domain/    导入规范化、数据模型和采购计算
-backend/skills/    采购工作流
-backend/tools/     数据库原子操作、审批和审计
-backend/models/    SQLAlchemy 表模型
-migrations/        Alembic 数据库迁移
-tests/             领域、API、控制和 PostgreSQL 集成测试
-biz module/        业务流程、规则、UAT 与衡量方案
-demo/              可安全使用的合成演示数据
+frontend/          React frontend and Playwright browser tests
+backend/api/       REST API and identity boundaries
+backend/agent/     Agent orchestration and natural-language entry point
+backend/domain/    Import normalization, data models, and procurement calculations
+backend/skills/    Procurement workflows
+backend/tools/     Atomic database operations, approvals, and auditing
+backend/models/    SQLAlchemy table models
+migrations/        Alembic database migrations
+tests/             Domain, API, control, and PostgreSQL integration tests
+biz module/        Business processes, rules, UAT, and measurement plans
+demo/              Synthetic demo data safe for testing
 ```
 
-## 快速启动
+## Quick Start
 
 ### Docker Compose
 
-需要 Docker 引擎：
+Requires Docker Engine:
 
 ```powershell
 Copy-Item .env.example .env
@@ -152,22 +151,22 @@ docker compose up --build -d
 docker compose exec api python -m backend.demo --date 2026-09-27
 ```
 
-打开 http://localhost:8000；API 文档位于 http://localhost:8000/docs。Compose 会等待 PostgreSQL 就绪、执行迁移，再启动包含前端静态文件的 API 服务。
+Open `http://localhost:8000`. The API documentation is available at `http://localhost:8000/docs`. Docker Compose waits for PostgreSQL to become ready, runs the database migrations, and then starts the API service with the frontend static files included.
 
-### 本地开发
+### Local Development
 
-需要 Python 3.12+、[uv](https://docs.astral.sh/uv/)、PostgreSQL 和 Node.js 22：
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), PostgreSQL, and Node.js 22:
 
 ```powershell
 uv sync --locked
 Copy-Item .env.example .env
-# 在 .env 中设置 DATABASE_URL
+# Set `DATABASE_URL` in `.env`.
 uv run alembic upgrade head
 uv run python -m backend.demo --date 2026-09-27
 uv run uvicorn backend.main:app --reload
 ```
 
-另开终端启动前端：
+Open a separate terminal and start the frontend:
 
 ```powershell
 cd frontend
@@ -175,31 +174,31 @@ npm ci
 npm run dev
 ```
 
-打开 http://127.0.0.1:5173。Vite 会把 API 请求代理到 8000 端口。生产模式下，在 `frontend` 运行 `npm run build` 后重启 FastAPI，即可由 8000 端口统一提供前后端。
+Open `http://127.0.0.1:5173`. Vite proxies API requests to port `8000`. In production mode, run `npm run build` in the `frontend` directory and restart FastAPI. Both the frontend and backend will then be served through port `8000`.
 
-## 演示数据
+## Demo Data
 
-`demo/` 包含六份 CSV、等价 JSON 和一次运行报告。固定演示日期为 `2026-09-27`，预期结果为：
+The `demo/` directory contains six CSV files, equivalent JSON data, and a sample run report. The fixed demo date is `2026-09-27`, with the following expected results:
 
 ```text
 10 SKU / 3 suppliers
 6 REORDER / 1 NO_REORDER / 3 BLOCKED
 ```
 
-前端还提供三个可直接运行的故事：标准采购、及时与延迟在途对比、三类异常修正。所有币种使用测试标识 `XTS`，金额为税前合成数据。
+The frontend also provides three ready-to-run demo scenarios: standard procurement, a comparison of on-time versus delayed incoming purchase orders, and three exception-resolution cases. All currencies use the test code `XTS`, and all amounts are synthetic pre-tax data.
 
-## API 身份边界
+## API Identity Boundaries
 
-所有 `/api/v1` 接口要求 `X-API-Key`：
+All `/api/v1` endpoints require an `X-API-Key`:
 
-| 身份 | 环境变量 | 权限 |
+| Identity | Environment Variable | Permissions |
 | --- | --- | --- |
-| 服务 / Agent | `API_KEY` | 导入、检查、生成草稿、查询、导出已批准草稿 |
-| 人工审核人 | `REVIEWER_API_KEY` | 服务权限 + 修正来源、编辑草稿、批准和拒绝 |
+| Service / Agent | `API_KEY` | Import, run checks, generate drafts, query data, and export approved drafts. |
+| Human Reviewer | `REVIEWER_API_KEY` | Service permissions + source corrections, draft editing, approval, and rejection. |
 
-两种 Key 必须不同。演示默认值位于 `.env.example`，对外部署前必须更换并启用 HTTPS。DeepSeek 密钥只由后端读取，可通过 `DEEPSEEK_API_KEY` 或被 Git 忽略的 `deepseek_api_key.txt` 配置，绝不能放入前端变量或仓库。
+The two keys must be different. Demo default values are provided in `.env.example`; they must be replaced before external deployment, and HTTPS must be enabled. The DeepSeek API key is read only by the backend and can be configured through `DEEPSEEK_API_KEY` or a Git-ignored `deepseek_api_key.txt` file. It must never be exposed in frontend environment variables or committed to the repository.
 
-## 测试与当前状态
+## Testing and Current Status
 
 ```powershell
 uv run pytest -q
@@ -210,20 +209,20 @@ $env:FRONTEND_URL='http://127.0.0.1:8000'
 npm run test:e2e
 ```
 
-当前版本已通过：
+The current version has passed:
 
-- 74 项 PostgreSQL 后端与集成测试
-- 11 条浏览器端到端流程，覆盖驾驶舱、只读模拟、Daily Brief、登录界面、账户结构和真实采购 API
-- TypeScript 检查和 Vite 生产构建
-- Alembic 升级、降级、重新升级与 schema drift 检查
-- 1440px 桌面端和 390px 移动端视觉检查
+- 70 PostgreSQL backend and integration tests
+- 9 real API browser end-to-end workflows
+- TypeScript checks and Vite production build
+- Alembic upgrade, downgrade, re-upgrade, and schema drift checks
+- Visual checks at 1440px desktop and 390px mobile widths
 
-Docker 配置已经提供，但由于开发机当时没有可用 Docker 引擎，镜像构建尚未在本机实测。DeepSeek 行为通过替身响应测试，没有消耗真实模型调用。
+Docker configuration is provided, but the image build has not yet been tested locally because a working Docker engine was unavailable on the development machine at the time. DeepSeek behavior was tested using mocked responses without making real model API calls.
 
-更详细的接口与验证信息见 [API 文档](docs/api.md)、[业务决策记录](docs/business-decisions.md)、[前端说明](frontend/README.md) 和 [验证记录](docs/verification.md)。
+For more detailed API and verification information, see the [API Documentation](docs/api.md), [Business Decision Records](docs/business-decisions.md), [Frontend Documentation](frontend/README.md), and [Verification Records](docs/verification.md).
 
-## 项目边界
+## Project Scope
 
-本 MVP 采用单仓库、单币种和默认供应商策略。导出的文件是经过人工批准的采购准备结果，不会自动发送给供应商。不同运行相互独立；下一次运行所需的剩余在途订单应由新的输入数据明确提供。
+This MVP uses a single-warehouse, single-currency, and default-supplier strategy. Exported files contain human-approved procurement preparation results and are not automatically sent to suppliers. Each run is independent; any remaining open purchase orders required for the next run must be explicitly provided in the new input data.
 
-项目依据 `biz module` 中的流程基线、痛点分析、端到端场景、业务规则和衡量方案实现。当前界面不会虚构节省时间、准确率或投资回报；这些指标需要通过真实的人工基线与试运行数据后再评估。
+The project is implemented based on the process baseline, pain-point analysis, end-to-end scenarios, business rules, and measurement plan defined in the `biz module`. The current interface does not make unsupported claims about time savings, accuracy improvements, or return on investment; these metrics should be evaluated only after collecting real manual-process baselines and pilot-run data.
