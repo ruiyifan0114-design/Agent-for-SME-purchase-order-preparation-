@@ -194,6 +194,12 @@ export interface AgentReply {
   sku_id?: string | null
   unit_price?: string | null
   provider: string
+  tools_used?: string[]
+}
+
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 export interface DecisionMetrics {

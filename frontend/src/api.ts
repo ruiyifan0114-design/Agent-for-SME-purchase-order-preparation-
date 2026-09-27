@@ -1,5 +1,6 @@
 import type {
   AgentReply,
+  ChatTurn,
   ApprovalEvent,
   AuditEvent,
   Batch,
@@ -126,6 +127,11 @@ export const api = {
       true,
     ),
   export: (id: string) => request<Blob>(`/drafts/${id}/export`),
-  message: (message: string, run_id?: string, sku_id?: string) =>
-    post<AgentReply>('/agent/message', { message, run_id: run_id || null, sku_id: sku_id || null }),
+  message: (message: string, run_id?: string, sku_id?: string, history: ChatTurn[] = []) =>
+    post<AgentReply>('/agent/message', {
+      message,
+      run_id: run_id || null,
+      sku_id: sku_id || null,
+      history: history.slice(-10),
+    }),
 }

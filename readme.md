@@ -74,7 +74,9 @@ The approval process has clear safety boundaries:
 
 ### 6. Agent Explanations and Complete Audit Trail
 
-The Agent panel on the right can explain saved decisions, identify exceptions, and open the relevant correction forms based on user input. DeepSeek is used only for optional natural-language intent recognition. Even without a configured model, procurement calculations, exception handling, and approval workflows remain fully functional.
+The Agent panel on the right is a multi-turn procurement chatbot powered by DeepSeek. Users can freely ask about SKUs, supplier spend, exceptions, PO drafts, historical changes, and policy scenarios in the current review. The model selects controlled read-only tools and analyzes the evidence returned from the database. The client sends at most the latest 10 conversation turns, and the model's private reasoning is never returned to the frontend.
+
+The Agent receives tools for run overviews, SKU evidence, exceptions, drafts, the Decision Cockpit, read-only simulations, procurement rules, and page navigation. It receives no approval, rejection, export, or write tools. A price correction form opens only when the user explicitly supplies a concrete price; the model can never invent or save one.
 
 Imports, checks, corrections, draft generation, edits, approvals, rejections, and exports are all recorded in the PostgreSQL audit log. The run context is frozen, ensuring that later imports cannot silently alter historical decisions.
 
@@ -82,7 +84,7 @@ Imports, checks, corrections, draft generation, edits, approvals, rejections, an
 
 The management dashboard summarizes recommended procurement value, decision completion rate, approved value, supplier spend, and status or quantity changes compared with the previous run. Users can adjust demand ratios, safety and target stock ratios, review horizons, and supplier lead times to run read-only scenario simulations. The simulation reuses the same deterministic domain engine and does not modify source data, official runs, PO drafts, or approvals.
 
-The Agent can generate a Daily Brief based on the current database state and explain material changes compared with the previous run. DeepSeek remains responsible only for optional intent classification; all quantities and monetary values in the brief are calculated from results already stored by the backend.
+The Agent can generate a Daily Brief based on the current database state and explain material changes compared with the previous run. Daily Briefs use a deterministic local shortcut; other free-form questions are answered after DeepSeek selects read-only tools. Quantities and monetary values always come from persisted results returned by those tools.
 
 ## Workflow
 
@@ -120,10 +122,10 @@ flowchart LR
 | --- | --- |
 | Web Application | React 19、TypeScript、Vite；Six pages: Overview, Import, SKU, Exceptions, Purchase Orders (PO), and Audit. |
 | API | FastAPI；Authentication, input validation, standardized error responses, and static frontend hosting. |
-| Agent | Recoverable workflow orchestration; reads persisted state and determines the next action. |
-| Domain Engine | Python、Pydantic、Decimal； |
+| Agent | DeepSeek ReAct multi-turn tool loop; answers from persisted evidence, rules, and read-only simulation results. |
+| Domain Engine | Python、Pydantic、Decimal；Deterministic inventory and replenishment calculations. |
 | Data Layer | PostgreSQL、SQLAlchemy、Alembic；14 business tables, transactions, locks, and audit records. |
-| Optional Model | DeepSeek；Only parses natural-language intent; it does not perform calculations or approvals. |
+| Reasoning Model | DeepSeek thinking and tool calls; it cannot directly calculate commitments, write data, or approve orders. |
 
 ```text
 frontend/          React frontend and Playwright browser tests
@@ -211,13 +213,13 @@ npm run test:e2e
 
 The current version has passed:
 
-- 70 PostgreSQL backend and integration tests
-- 9 real API browser end-to-end workflows
+- 75 backend and integration tests, with 1 additional environment-dependent test skipped
+- 11 browser end-to-end workflows covering the cockpit, read-only simulation, Daily Brief, authentication UI, account structure, and real procurement APIs
 - TypeScript checks and Vite production build
 - Alembic upgrade, downgrade, re-upgrade, and schema drift checks
 - Visual checks at 1440px desktop and 390px mobile widths
 
-Docker configuration is provided, but the image build has not yet been tested locally because a working Docker engine was unavailable on the development machine at the time. DeepSeek behavior was tested using mocked responses without making real model API calls.
+Docker configuration is provided, but the image build has not yet been tested locally because a working Docker engine was unavailable on the development machine at the time. The DeepSeek tool loop is covered by mocked response tests and has also been verified once against the real API using the local synthetic procurement dataset.
 
 For more detailed API and verification information, see the [API Documentation](docs/api.md), [Business Decision Records](docs/business-decisions.md), [Frontend Documentation](frontend/README.md), and [Verification Records](docs/verification.md).
 

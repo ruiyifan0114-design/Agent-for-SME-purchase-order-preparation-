@@ -2049,6 +2049,15 @@ tbody tr:hover {
   color: #9cab8c;
   margin-top: 5px;
 }
+.agent-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: #4b8b67;
+  box-shadow: 0 0 0 2px rgba(75, 139, 103, 0.12);
+}
 .chat-messages {
   padding: 17px;
   overflow: auto;

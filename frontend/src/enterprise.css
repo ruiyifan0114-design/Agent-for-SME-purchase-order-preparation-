@@ -609,8 +609,31 @@ label {
   border-color: #d7dee5;
   box-shadow: 0 20px 60px rgba(8, 20, 38, 0.2);
 }
-.message p {
-  white-space: pre-line;
+.chat-message-body {
+  display: grid;
+  gap: 5px;
+}
+.chat-message-body p,
+.chat-message-body h4 {
+  margin: 0;
+}
+.chat-message-body h4 {
+  margin-top: 5px;
+  color: inherit;
+  font-size: 11px;
+}
+.chat-message-body code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(15, 33, 52, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9em;
+}
+.chat-list-item {
+  padding-left: 3px;
+}
+.chat-line-break {
+  height: 2px;
 }
 
 /* Decision cockpit */

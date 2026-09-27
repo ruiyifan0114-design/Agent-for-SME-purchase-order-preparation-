@@ -80,21 +80,56 @@ def test_unknown_demo_and_message_request_validation(web):
 
 
 def test_deepseek_failure_is_explicit(monkeypatch):
-    monkeypatch.setattr(messages,"settings",lambda:SimpleNamespace(deepseek_api_key="test-only",deepseek_model="test-model"))
+    monkeypatch.setattr(messages,"settings",lambda:SimpleNamespace(
+        deepseek_api_key="test-only", deepseek_key_file="missing.txt", deepseek_model="test-model"))
     def fail(*args,**kwargs):
         raise URLError("test provider unavailable")
     monkeypatch.setattr(messages,"urlopen",fail)
     with pytest.raises(BusinessError) as exc:
-        messages.classify("Could you assist me with my day?")
+        messages._deepseek_reply(SimpleNamespace(), MessageRequest(
+            message="Could you assist me with my day?", history=[]), "test-only")
     assert exc.value.code == "AGENT_UNAVAILABLE"
 
 
 def test_deepseek_cannot_supply_commercial_values(monkeypatch,t,start):
-    monkeypatch.setattr(messages,"settings",lambda:SimpleNamespace(deepseek_api_key="test-only",deepseek_model="test-model"))
-    payload={"choices":[{"message":{"content":json.dumps({"action":"PRICE","unit_price":"9999"})}}]}
+    monkeypatch.setattr(messages,"settings",lambda:SimpleNamespace(
+        deepseek_api_key="test-only", deepseek_key_file="missing.txt", deepseek_model="test-model"))
+    payload={"choices":[{"message":{"role":"assistant","content":"I suggest a price of 9999."}}]}
     monkeypatch.setattr(messages,"urlopen",lambda *a,**k:io.BytesIO(json.dumps(payload).encode()))
-    reply=t.agent_message(MessageRequest(message="Amend SKU-004 please",run_id=start()))
+    reply=t.agent_message(MessageRequest(message="Amend SKU-004 please",run_id=start(),history=[]))
     assert reply["action"] == "NONE" and reply["unit_price"] is None
+
+
+def test_deepseek_react_uses_grounded_tool_and_hides_reasoning(monkeypatch,t,start):
+    monkeypatch.setattr(messages,"settings",lambda:SimpleNamespace(
+        deepseek_api_key="test-only", deepseek_key_file="missing.txt", deepseek_model="test-model"))
+    responses = iter([
+        {"choices":[{"message":{"role":"assistant","content":None,
+            "reasoning_content":"private chain of thought",
+            "tool_calls":[{"id":"call-1","type":"function","function":{
+                "name":"get_decision_cockpit","arguments":"{}"}}]}}]},
+        {"choices":[{"message":{"role":"assistant","content":
+            "Supplier SUP-01 has the highest grounded recommended spend."}}]},
+    ])
+    requests = []
+    def respond(request, **kwargs):
+        requests.append(json.loads(request.data.decode()))
+        return io.BytesIO(json.dumps(next(responses)).encode())
+    monkeypatch.setattr(messages,"urlopen",respond)
+    reply=t.agent_message(MessageRequest(
+        message="Which supplier has the highest recommended spend?",run_id=start(),history=[]))
+    assert reply["provider"] == "DeepSeek ReAct"
+    assert reply["tools_used"] == ["get_decision_cockpit"]
+    assert "private chain" not in json.dumps(reply)
+    assert requests[1]["messages"][-1]["role"] == "tool"
+    assert requests[1]["messages"][-2]["reasoning_content"] == "private chain of thought"
+    assert "spend_by_supplier" in requests[1]["messages"][-1]["content"]
+
+
+def test_deepseek_has_only_read_only_procurement_tools():
+    names = {item["function"]["name"] for item in messages.TOOL_DEFINITIONS}
+    assert {"get_sku_evidence", "simulate_scenario", "get_procurement_rules"} <= names
+    assert not names & {"approve_po", "reject_po", "export_po", "update_po_line", "resolve_exception"}
 
 
 def test_decision_cockpit_uses_stored_results_and_previous_run(t, start):
