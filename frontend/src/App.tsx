@@ -13,16 +13,19 @@ import {
   FileCheck2,
   LayoutDashboard,
   Layers3,
+  LogOut,
   Menu,
   RefreshCw,
   Settings2,
   ShieldCheck,
+  UserRound,
   X,
 } from 'lucide-react'
 import { api, setCredentials } from './api'
 import AgentPanel from './AgentPanel'
 import { Badge, Button, ErrorNotice, Evidence, Loading, Modal, shortId } from './components'
 import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
+import { PublicExperience, type WorkspaceUser } from './PublicExperience'
 import {
   AuditScreen,
   Dashboard,
@@ -64,6 +67,7 @@ type Dialog =
   | { kind: 'review'; draft: Draft; reject: boolean }
   | { kind: 'history'; draft: Draft; events: ApprovalEvent[] }
   | { kind: 'connection' }
+  | { kind: 'account' }
   | { kind: 'help' }
 function initialCredentials(): Credentials {
   try {
@@ -82,7 +86,7 @@ function initialScreen(): Screen {
   return navigation.some((n) => n.id === hash) ? (hash as Screen) : 'dashboard'
 }
 
-export default function App() {
+function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () => void }) {
   const [credentials, saveCredentials] = useState(initialCredentials),
     [screen, setScreen] = useState<Screen>(initialScreen),
     [mobileMenu, setMobileMenu] = useState(false)
@@ -381,6 +385,9 @@ export default function App() {
     }
   }
   const badgeCount = run?.blocked_count || 0
+  const pendingDraftCount = drafts.filter(
+    (draft) => draft.lines.length && draft.status !== 'APPROVED',
+  ).length
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileMenu ? 'mobile-open' : ''}`}>
@@ -404,6 +411,13 @@ export default function App() {
           {navigation.map((item) => (
             <button
               key={item.id}
+              aria-label={`${item.label}${
+                item.id === 'exceptions' && badgeCount
+                  ? ` ${badgeCount}`
+                  : item.id === 'drafts' && pendingDraftCount
+                    ? ` ${pendingDraftCount}`
+                    : ''
+              }`}
               className={screen === item.id ? 'active' : ''}
               onClick={() => go(item.id)}
             >
@@ -412,12 +426,9 @@ export default function App() {
               {item.id === 'exceptions' && badgeCount > 0 && (
                 <span className="nav-count">{badgeCount}</span>
               )}
-              {item.id === 'drafts' &&
-                drafts.filter((d) => d.lines.length && d.status !== 'APPROVED').length > 0 && (
-                  <span className="nav-count quiet">
-                    {drafts.filter((d) => d.lines.length && d.status !== 'APPROVED').length}
-                  </span>
-                )}
+              {item.id === 'drafts' && pendingDraftCount > 0 && (
+                <span className="nav-count quiet">{pendingDraftCount}</span>
+              )}
             </button>
           ))}
         </nav>
@@ -442,12 +453,13 @@ export default function App() {
             Quick guide
             <ArrowUpRight size={14} />
           </button>
-          <button className="profile" onClick={() => setDialog({ kind: 'connection' })}>
-            <span className="profile-avatar">PR</span>
+          <button className="profile" onClick={() => setDialog({ kind: 'account' })}>
+            <span className="profile-avatar">{user.initials}</span>
             <span>
-              Procurement reviewer<small>Local demo workspace</small>
+              {user.name}
+              <small>{user.role}</small>
             </span>
-            <Settings2 size={15} />
+            <UserRound size={15} />
           </button>
         </div>
       </aside>
@@ -482,7 +494,18 @@ export default function App() {
               <Bell size={18} />
               {badgeCount > 0 && <i />}
             </button>
-            <span className="top-avatar">PR</span>
+            <button
+              className="top-account"
+              aria-label="Open account"
+              onClick={() => setDialog({ kind: 'account' })}
+            >
+              <span className="top-avatar">{user.initials}</span>
+              <span>
+                {user.name}
+                <small>{user.role}</small>
+              </span>
+              <ChevronDown size={14} />
+            </button>
           </div>
         </header>
         <div className="runbar">
@@ -725,6 +748,41 @@ export default function App() {
           }}
         />
       )}
+      {dialog?.kind === 'account' && (
+        <Modal title="Account" subtitle="Workspace identity and access" onClose={closeDialog}>
+          <div className="modal-body account-panel">
+            <div className="account-identity">
+              <span className="account-avatar">{user.initials}</span>
+              <div>
+                <h3>{user.name}</h3>
+                <p>{user.email}</p>
+              </div>
+            </div>
+            <dl className="account-details">
+              <div>
+                <dt>Role</dt>
+                <dd>{user.role}</dd>
+              </div>
+              <div>
+                <dt>Workspace</dt>
+                <dd>Synthetic Office Co.</dd>
+              </div>
+              <div>
+                <dt>Access</dt>
+                <dd>Reviewer</dd>
+              </div>
+            </dl>
+            <div className="modal-actions account-actions">
+              <Button kind="secondary" onClick={() => setDialog({ kind: 'connection' })}>
+                <Settings2 size={15} /> Connection settings
+              </Button>
+              <Button kind="secondary" onClick={onSignOut}>
+                <LogOut size={15} /> Sign out
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {dialog?.kind === 'help' && (
         <Modal title="Your daily procurement workflow" onClose={closeDialog}>
           <div className="modal-body quick-guide">
@@ -771,5 +829,45 @@ export default function App() {
         </Modal>
       )}
     </div>
+  )
+}
+
+const demoUser: WorkspaceUser = {
+  name: 'Procurement Reviewer',
+  email: 'reviewer@supplydesk.demo',
+  role: 'Procurement Manager',
+  initials: 'PR',
+}
+
+function savedUser(): WorkspaceUser | null {
+  try {
+    return JSON.parse(sessionStorage.getItem('supplydesk-user') || 'null')
+  } catch {
+    return null
+  }
+}
+
+export default function App() {
+  const directWorkspace = navigation.some((item) => location.hash.slice(1) === item.id)
+  const [user, setUser] = useState<WorkspaceUser | null>(() => savedUser())
+  const [workspace, setWorkspace] = useState(() => directWorkspace || Boolean(savedUser()))
+
+  const enter = (next: WorkspaceUser = demoUser) => {
+    sessionStorage.setItem('supplydesk-user', JSON.stringify(next))
+    setUser(next)
+    setWorkspace(true)
+    if (!navigation.some((item) => location.hash.slice(1) === item.id)) location.hash = 'dashboard'
+  }
+  const signOut = () => {
+    sessionStorage.removeItem('supplydesk-user')
+    setUser(null)
+    setWorkspace(false)
+    history.replaceState(null, '', location.pathname)
+  }
+
+  return workspace ? (
+    <WorkspaceApp user={user || demoUser} onSignOut={signOut} />
+  ) : (
+    <PublicExperience onEnter={enter} />
   )
 }

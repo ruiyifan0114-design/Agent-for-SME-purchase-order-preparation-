@@ -207,7 +207,7 @@ npm run test:e2e
 当前版本已通过：
 
 - 70 项 PostgreSQL 后端与集成测试
-- 9 条真实 API 浏览器端到端流程
+- 10 条浏览器端到端流程，覆盖登录界面、账户结构和真实采购 API
 - TypeScript 检查和 Vite 生产构建
 - Alembic 升级、降级、重新升级与 schema drift 检查
 - 1440px 桌面端和 390px 移动端视觉检查

@@ -1,6 +1,6 @@
 # Procurement workspace frontend
 
-React + TypeScript + Vite, connected to the real FastAPI backend.
+React + TypeScript + Vite, connected to the real FastAPI backend. The interface includes a public product landing page, frontend-ready login and sign-up flows, account identity, and a compact hover-expand enterprise workspace shell.
 
 ## Start
 
@@ -38,4 +38,4 @@ npm run test:e2e
 
 Tests require the backend, database and frontend running with default demo credentials. They create synthetic runs and approved drafts; use a development database. Windows uses installed Microsoft Edge. On other platforms install Chromium using `node node_modules/@playwright/test/cli.js install chromium`.
 
-All nine browser workflows passed against the production build: approval/export/reapproval/rejection, incoming stock, three blocker corrections, agent suggestions without silent writes, failed approval, CSV validation, mobile layout, scan resumption and rejected JSON intake. Fonts are bundled locally. See [verification](../docs/verification.md) for backend checks and environment limitations.
+All ten browser workflows passed against the production build: landing/authentication/account structure, approval/export/reapproval/rejection, incoming stock, three blocker corrections, agent suggestions without silent writes, failed approval, CSV validation, mobile layout, scan resumption and rejected JSON intake. Fonts are bundled locally. See [verification](../docs/verification.md) for backend checks and environment limitations.

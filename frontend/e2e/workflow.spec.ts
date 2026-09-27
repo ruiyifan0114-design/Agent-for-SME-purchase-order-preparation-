@@ -36,6 +36,28 @@ async function approve(page: Page, supplier: string) {
   return card
 }
 
+test('landing, authentication and account shell are ready for backend identity integration', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
+  await expect(page.getByText('PROCUREMENT INTELLIGENCE, WITH CONTROL')).toBeVisible()
+  await page.screenshot({ path: 'test-results/landing-desktop.png', fullPage: true })
+  await page.getByRole('button', { name: 'Log in' }).click()
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
+  await page.getByLabel('Password').fill('reviewer-demo')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
+  await page.getByRole('button', { name: 'Open account' }).click()
+  const account = page.getByRole('dialog', { name: 'Account' })
+  await expect(account).toContainText('Reviewer')
+  await expect(account).toContainText('Procurement Manager')
+  await account.getByRole('button', { name: 'Sign out' }).click()
+  await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Request access' }).click()
+  await expect(page.getByRole('heading', { name: 'Start with Supplydesk' })).toBeVisible()
+})
+
 test('normal review, explicit approval, export, critical edit and rejection', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
@@ -243,6 +265,11 @@ test('CSV upload validates records and keeps validation findings visible', async
 test('responsive layout and keyboard dialog close on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
+  await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+  ).toBeTruthy()
+  await page.getByRole('button', { name: 'Enter dashboard' }).click()
   await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -282,7 +309,7 @@ test('an interrupted scan resumes the same run and keeps all expected SKUs visib
       })
     ).json()
   ).data
-  await page.goto('/')
+  await page.goto('/#dashboard')
   await expect(page.getByLabel('Current procurement run')).toHaveValue(created.id)
   await expect(page.getByRole('button', { name: 'Resume current check' })).toBeVisible()
   await nav(page, 'SKU check')
@@ -306,13 +333,11 @@ test('JSON filename survives intake and rejected datasets stay visible', async (
   const demo = (await (await page.request.get('/api/v1/demo/normal', { headers: header })).json())
     .data
   demo.dataset.sku_master.push(demo.dataset.sku_master[0])
-  await page
-    .getByLabel('Upload source files')
-    .setInputFiles({
-      name: 'invalid-duplicate-master.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(demo.dataset)),
-    })
+  await page.getByLabel('Upload source files').setInputFiles({
+    name: 'invalid-duplicate-master.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(demo.dataset)),
+  })
   await page.getByRole('button', { name: 'Upload & validate' }).click()
   await expect(page.getByRole('alert')).toContainText('Import rejected')
   await expect(page.getByRole('dialog')).toHaveCount(0)
