@@ -23,8 +23,8 @@ def ok(data):
 
 
 @router.post("/imports", response_model=Envelope, status_code=201)
-def import_json(dataset: dict, t=Depends(tools)):
-    return ok(t.import_dataset(dataset))
+def import_json(dataset: dict, filename: str = Query("dataset.json", min_length=1, max_length=255), t=Depends(tools)):
+    return ok(t.import_dataset(dataset, filename))
 
 
 @router.post("/imports/upload", response_model=Envelope, status_code=201)

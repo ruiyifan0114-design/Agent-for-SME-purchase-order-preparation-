@@ -1,27 +1,28 @@
-# Development checkpoint
+# Development status
 
-This commit saves the current work at the user's request before frontend development is complete.
+Completed and verified on 2026-09-27. This replaces the source-only checkpoint.
 
-## Backend
+## Delivered
 
-Implemented FastAPI, PostgreSQL/SQLAlchemy, Alembic, deterministic procurement calculations, import validation, exception correction, supplier-grouped PO drafts, explicit human approval, export and audit history. Synthetic fixtures and automated tests are included.
+FastAPI/PostgreSQL backend and React/TypeScript frontend provide validated imports, deterministic SKU decisions, source evidence, correction forms, supplier PO drafts, explicit human approval, CSV export and audit history. The responsive workspace includes six pages, three synthetic demo scenarios, resumable scans, rejected import visibility, loading/error feedback and an agent panel.
 
-The original backend passed 55 PostgreSQL tests and migration checks (see `verification.md`). Subsequent frontend integration additions include read-only draft listing, synthetic demo scenarios, and a server-side agent message endpoint. DeepSeek is an optional intent parser; it does not perform procurement calculations or approvals. These additions still need dedicated integration tests.
+The agent explains saved decisions and opens proposed corrections. Saving changes and approving orders remain explicit user actions. Optional DeepSeek intent parsing runs on the backend. Provider credentials never enter the frontend bundle.
 
-## Frontend in progress
+Vite supports local development; FastAPI serves production assets on port 8000. A multi-stage Docker configuration builds both components.
 
-React + TypeScript + Vite source is included for the dashboard, data intake, SKU results, exception forms, PO review/approval, audit and compact agent panel. API calls target the real backend.
+## Verification
 
-The UI stylesheet (`frontend/src/styles.css`) has not yet been implemented. Therefore the frontend is **not build-ready** in this checkpoint. Visual verification, browser end-to-end tests, and frontend setup documentation remain to be completed. This is a source backup, not a finished frontend release.
+- Production TypeScript check and Vite build passed.
+- All 70 backend tests passed against PostgreSQL.
+- All 9 browser workflows passed against the production frontend and real API.
+- Desktop and mobile screenshots were visually inspected.
+- DeepSeek provider behavior was tested with stubs; no live paid provider request was made.
+- Docker configuration is supplied, but its image build was not tested because the local Docker engine was unavailable.
 
-## Local-only files
+See [verification](verification.md) and [frontend instructions](../frontend/README.md).
 
-The DeepSeek API key, `.env`, local databases, runtime outputs, virtual environments, node_modules and caches are excluded. No real provider key is required to build or test the deterministic backend. To configure DeepSeek on another machine, set `DEEPSEEK_API_KEY` on the backend or create the ignored local `deepseek_api_key.txt` file. Never put provider keys in frontend environment variables or source files.
+## Business boundaries
 
-## Next steps
+Scan coverage and decision completion are shown separately. Blocked SKUs remain visible. Critical PO edits invalidate approval; only approved drafts can export. The audit page does not claim time savings, correctness scores or a manual baseline that has not been measured. These choices incorporate the additional workflow, pain-point, scenario and measurement documents in biz module.
 
-1. Complete the frontend stylesheet and resolve any TypeScript/build errors.
-2. Verify against the live backend and its OpenAPI schema.
-3. Test all three demo stories and the full human approval workflow in a browser.
-4. Add targeted tests for the new backend endpoints and run regression checks.
-5. Update setup instructions and record final verification results.
+This is a single-reviewer MVP using synthetic demo records, with no automatic sending of orders to suppliers. Provider keys, local runtime files, dependencies and generated build output are excluded from source control.

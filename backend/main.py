@@ -1,8 +1,10 @@
 import logging
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 from sqlalchemy import text
 from backend.api.routes import router
@@ -49,3 +51,10 @@ def ready():
     with engine.connect() as connection:
         connection.execute(text("SELECT version_num FROM alembic_version"))
     return {"data": {"status": "ready"}}
+
+
+# The built hash-routed frontend can share one origin with the REST API.
+# Register last so API and health routes retain precedence.
+frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+if frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

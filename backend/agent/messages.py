@@ -28,10 +28,10 @@ def classify(message):
     text = message.lower()
     if any(w in text for w in ("approve", "reject", "批准", "审批", "拒绝", "export", "导出")):
         return "NONE", "workflow"
-    if re.search(r"(?:price|价格|单价).*?\d|\d.*?(?:price|价格|单价)", text):
-        return "PRICE", "workflow"
     if any(w in text for w in ("why", "explain", "为什么", "原因", "blocked", "阻塞")):
         return "EXPLAIN", "workflow"
+    if re.search(r"(?:price|价格|单价).*?\d|\d.*?(?:price|价格|单价)", text):
+        return "PRICE", "workflow"
     if any(w in text for w in ("draft", "草稿", "采购单")):
         return "DRAFTS", "workflow"
     if any(w in text for w in ("run", "start", "运行", "检查", "开始")):
@@ -65,7 +65,9 @@ def reply(tools, request: MessageRequest):
     result = None
     if sku and request.run_id:
         result = tools.get_sku_context(request.run_id, sku)
-    price_match = re.search(r"(?:price|价格|单价)\D{0,20}(\d+(?:\.\d{1,4})?)(?![\d.])", request.message, re.I)
+    price_match = re.search(
+        r"(?:unit\s+price|price|价格|单价)\s*(?:(?:is|为|是)\s*|[:=]\s*)?(\d+(?:\.\d{1,4})?)(?!\d|\.\d)",
+        request.message, re.I)
     price = price_match.group(1) if price_match else None
     if action == "EXPLAIN" and result:
         exceptions = [e for e in tools.list_exceptions(request.run_id) if e["result_id"] == result["id"] and e["status"] == "OPEN"]

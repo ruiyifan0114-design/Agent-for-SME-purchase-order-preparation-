@@ -1,75 +1,775 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, AlertCircle, ArrowUpRight, Bell, Bot, CheckCheck, ChevronDown, CircleHelp, ClipboardCheck, Database, FileCheck2, LayoutDashboard, Layers3, Menu, RefreshCw, Settings2, ShieldCheck, X } from 'lucide-react'
+import {
+  Activity,
+  AlertCircle,
+  ArrowUpRight,
+  Bell,
+  Bot,
+  CheckCheck,
+  ChevronDown,
+  CircleHelp,
+  ClipboardCheck,
+  Database,
+  FileCheck2,
+  LayoutDashboard,
+  Layers3,
+  Menu,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  X,
+} from 'lucide-react'
 import { api, setCredentials } from './api'
 import AgentPanel from './AgentPanel'
 import { Badge, Button, ErrorNotice, Evidence, Loading, Modal, shortId } from './components'
 import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
-import { AuditScreen, Dashboard, DataScreen, DraftScreen, ExceptionScreen, History, SKUScreen } from './screens'
+import {
+  AuditScreen,
+  Dashboard,
+  DataScreen,
+  DraftScreen,
+  ExceptionScreen,
+  History,
+  SKUScreen,
+} from './screens'
 import type { Screen } from './screens'
-import type { AgentReply, ApprovalEvent, AuditEvent, Batch, Check, Context, Credentials, Draft, ExceptionItem, Line, Run, RunRequest } from './types'
+import type {
+  AgentReply,
+  ApprovalEvent,
+  AuditEvent,
+  Batch,
+  Check,
+  Context,
+  Credentials,
+  Draft,
+  ExceptionItem,
+  Line,
+  Run,
+  RunRequest,
+} from './types'
 
-const navigation=[{id:'dashboard',label:'Overview',icon:LayoutDashboard},{id:'data',label:'Data intake',icon:Database},{id:'skus',label:'SKU check',icon:ClipboardCheck},{id:'exceptions',label:'Exceptions',icon:AlertCircle},{id:'drafts',label:'PO drafts',icon:FileCheck2},{id:'audit',label:'Audit trail',icon:Activity}] as const
-type Dialog={kind:'run';initial?:Partial<RunRequest>}|{kind:'evidence';result:Check}|{kind:'correction';result:Check;exception?:ExceptionItem;price?:string}|{kind:'edit';draft:Draft;line:Line}|{kind:'review';draft:Draft;reject:boolean}|{kind:'history';draft:Draft;events:ApprovalEvent[]}|{kind:'connection'}|{kind:'help'}
-function initialCredentials():Credentials{try{return JSON.parse(sessionStorage.getItem('supplydesk-access')||'null')||{service:'local-service-change-me',reviewer:'local-reviewer-change-me'}}catch{return {service:'local-service-change-me',reviewer:'local-reviewer-change-me'}}}
-function initialScreen():Screen{const hash=location.hash.slice(1);return navigation.some(n=>n.id===hash)?hash as Screen:'dashboard'}
+const navigation = [
+  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+  { id: 'data', label: 'Data intake', icon: Database },
+  { id: 'skus', label: 'SKU check', icon: ClipboardCheck },
+  { id: 'exceptions', label: 'Exceptions', icon: AlertCircle },
+  { id: 'drafts', label: 'PO drafts', icon: FileCheck2 },
+  { id: 'audit', label: 'Audit trail', icon: Activity },
+] as const
+type Dialog =
+  | { kind: 'run'; initial?: Partial<RunRequest> }
+  | { kind: 'evidence'; result: Check }
+  | { kind: 'correction'; result: Check; exception?: ExceptionItem; price?: string }
+  | { kind: 'edit'; draft: Draft; line: Line }
+  | { kind: 'review'; draft: Draft; reject: boolean }
+  | { kind: 'history'; draft: Draft; events: ApprovalEvent[] }
+  | { kind: 'connection' }
+  | { kind: 'help' }
+function initialCredentials(): Credentials {
+  try {
+    return (
+      JSON.parse(sessionStorage.getItem('supplydesk-access') || 'null') || {
+        service: 'local-service-change-me',
+        reviewer: 'local-reviewer-change-me',
+      }
+    )
+  } catch {
+    return { service: 'local-service-change-me', reviewer: 'local-reviewer-change-me' }
+  }
+}
+function initialScreen(): Screen {
+  const hash = location.hash.slice(1)
+  return navigation.some((n) => n.id === hash) ? (hash as Screen) : 'dashboard'
+}
 
-export default function App(){
-  const [credentials,saveCredentials]=useState(initialCredentials),[screen,setScreen]=useState<Screen>(initialScreen),[mobileMenu,setMobileMenu]=useState(false)
-  const [runs,setRuns]=useState<Run[]>([]),[batches,setBatches]=useState<Batch[]>([]),[activeId,setActiveId]=useState(''),[run,setRun]=useState<Run|null>(null)
-  const [results,setResults]=useState<Check[]>([]),[exceptions,setExceptions]=useState<ExceptionItem[]>([]),[drafts,setDrafts]=useState<Draft[]>([]),[events,setEvents]=useState<AuditEvent[]>([])
-  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[toast,setToast]=useState(''),[dialog,setDialog]=useState<Dialog|null>(null),[chat,setChat]=useState(false)
-  const generation=useRef(0),auditOffset=useRef(0),currentId=useRef('')
+export default function App() {
+  const [credentials, saveCredentials] = useState(initialCredentials),
+    [screen, setScreen] = useState<Screen>(initialScreen),
+    [mobileMenu, setMobileMenu] = useState(false)
+  const [runs, setRuns] = useState<Run[]>([]),
+    [batches, setBatches] = useState<Batch[]>([]),
+    [activeId, setActiveId] = useState(''),
+    [run, setRun] = useState<Run | null>(null)
+  const [results, setResults] = useState<Check[]>([]),
+    [exceptions, setExceptions] = useState<ExceptionItem[]>([]),
+    [drafts, setDrafts] = useState<Draft[]>([]),
+    [events, setEvents] = useState<AuditEvent[]>([])
+  const [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(''),
+    [toast, setToast] = useState(''),
+    [dialog, setDialog] = useState<Dialog | null>(null),
+    [chat, setChat] = useState(false)
+  const generation = useRef(0),
+    auditOffset = useRef(0),
+    currentId = useRef('')
   setCredentials(credentials)
-  const closeDialog=useCallback(()=>setDialog(null),[])
-  const go=(value:Screen)=>{setScreen(value);location.hash=value;setMobileMenu(false)}
-  const notify=(message:string)=>setToast(message)
-  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(''),7000);return ()=>clearTimeout(t)},[toast])
-  useEffect(()=>{const fn=()=>setScreen(initialScreen());window.addEventListener('hashchange',fn);return ()=>window.removeEventListener('hashchange',fn)},[])
-  const loadRun=useCallback(async(id:string)=>{
-    const seq=++generation.current;setLoading(true)
-    try{const [r,s,e,d]=await Promise.all([api.run(id),api.results(id),api.exceptions(id),api.drafts(id)]);if(seq!==generation.current)return;setRun(r);setResults(s.sort((a,b)=>a.sku_id.localeCompare(b.sku_id)));setExceptions(e);setDrafts(d.sort((a,b)=>a.supplier_id.localeCompare(b.supplier_id)))}finally{if(seq===generation.current)setLoading(false)}
-  },[])
-  const bootstrap=useCallback(async()=>{setError('');setLoading(true);try{const [r,b]=await Promise.all([api.runs(),api.batches()]);setRuns(r);setBatches(b);const saved=sessionStorage.getItem('supplydesk-run');const id=r.find(v=>v.id===currentId.current||v.id===saved)?.id||r[0]?.id||'';if(id){setActiveId(id);currentId.current=id;await loadRun(id)}else{setRun(null);setResults([]);setExceptions([]);setDrafts([])}}catch(e){setError(e instanceof Error?e.message:'Unable to load workspace')}finally{setLoading(false)}},[loadRun])
-  useEffect(()=>{void bootstrap()},[bootstrap,credentials])
-  useEffect(()=>{if(screen==='audit'){auditOffset.current=0;void api.audit().then(setEvents).catch(e=>setError(e.message))}},[screen,activeId])
-  const selectRun=async(id:string)=>{if(busy||!id)return;setError('');setActiveId(id);currentId.current=id;sessionStorage.setItem('supplydesk-run',id);setRun(null);setResults([]);setExceptions([]);setDrafts([]);try{await loadRun(id)}catch(e){setError(e instanceof Error?e.message:'Unable to open run')}}
-  async function execute<T>(label:string,action:()=>Promise<T>):Promise<T>{setBusy(true);setError('');try{const value=await action();if(label)notify(label);return value}catch(e){setError(e instanceof Error?e.message:'Operation failed');throw e}finally{setBusy(false)}}
-  async function refreshAfterMutation(id:string,sync=false){try{if(sync)await api.resume(id);const [r,b]=await Promise.all([api.runs(),api.batches()]);setRuns(r);setBatches(b);await loadRun(id)}catch(e){setError(`Your change was saved, but the latest workspace could not be refreshed. Use Refresh before another action. ${e instanceof Error?e.message:''}`)}}
-  function openRun(batch?:Batch,initial?:Partial<RunRequest>){const chosen=batch||batches.find(b=>b.status.startsWith('VALIDATED'));if(!chosen){go('data');notify('Load a demo scenario or upload a validated dataset first.');return}const inventory=chosen.raw_data?.inventory_snapshot?.[0],supplier=chosen.raw_data?.supplier_master?.find(s=>s.currency);setDialog({kind:'run',initial:{batch_id:chosen.id,as_of:typeof inventory?.snapshot_date==='string'?inventory.snapshot_date:undefined,currency:typeof supplier?.currency==='string'?supplier.currency:'',warehouse:chosen.filename.startsWith('synthetic-')?'SYNTHETIC-WH-1':run?.warehouse||'',...initial}})}
-  async function startCheck(policy:RunRequest){await execute('',async()=>{const report=await api.review(policy);setDialog(null);setActiveId(report.run.id);currentId.current=report.run.id;sessionStorage.setItem('supplydesk-run',report.run.id);await refreshAfterMutation(report.run.id);go('dashboard');notify(`Check confirmed: ${report.run.processed_count} SKUs scanned, ${report.run.blocked_count} blocked. Drafts await human review.`)})}
-  async function loadDemo(scenario:string){await execute('',async()=>{const demo=await api.demo(scenario);const batch=await api.importJson(demo.dataset);setBatches(await api.batches());if(!batch.status.startsWith('VALIDATED'))throw new Error('Scenario import was rejected. Review the validation issues in Data intake.');openRun({...batch,filename:`synthetic-${scenario}`},demo.policy);notify('Synthetic dataset imported. Confirm the policy to run the check.')})}
-  async function upload(files:File[]){await execute('',async()=>{if(!files.length)throw new Error('Choose at least one file.');let batch:Batch;if(files.some(f=>f.name.toLowerCase().endsWith('.json'))){if(files.length!==1)throw new Error('Upload one JSON dataset at a time, separately from CSV or Excel files.');if(files[0].size>10*1024*1024)throw new Error('Upload exceeds 10 MB.');batch=await api.importJson(JSON.parse(await files[0].text()))}else batch=await api.upload(files);setBatches(await api.batches());if(batch.status==='REJECTED'){setError('Import rejected. Expand the batch below to review the validation errors.');return}notify(batch.issues.length?'Imported with validation warnings. Review the recorded issues before running.':'Input structure validated. Ready for the procurement check.');openRun(batch)})}
-  async function saveCorrection(context:Context,reason:string){if(dialog?.kind!=='correction'||!run)return;const {result,exception}=dialog;const id=run.id;await execute('',async()=>{const updated=exception?await api.resolve(exception.id,result.revision,context,reason): (await api.correct(id,result.sku_id,result.revision,context,reason)).result;setDialog(null);notify(`${updated.sku_id} correction saved and rechecked: ${updated.status}.`);await refreshAfterMutation(id,true)})}
-  async function saveLine(q:number,p:string,r:string){if(dialog?.kind!=='edit')return;const {draft,line}=dialog;await execute('',async()=>{await api.edit(draft,line.id,q,p,r);setDialog(null);notify('Line saved. Previous approval is invalidated; this PO needs a new review.');await refreshAfterMutation(draft.run_id)})}
-  async function review(comment:string){if(dialog?.kind!=='review')return;const {draft,reject}=dialog;await execute('',async()=>{await (reject?api.reject(draft,comment):api.approve(draft,comment));setDialog(null);notify(reject?'Rejection recorded by the backend.':'Human approval recorded. This version can now be exported.');await refreshAfterMutation(draft.run_id)})}
-  async function exportPO(d:Draft){await execute('Approved purchase order exported.',async()=>{const blob=await api.export(d.id),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`PO-${d.id}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)})}
-  async function history(d:Draft){await execute('',async()=>{const data=await api.history(d.id);setDialog({kind:'history',draft:d,events:data})})}
-  async function sync(){if(!run){openRun();return}await execute('Drafts synchronized with the current SKU decisions.',async()=>{await api.resume(run.id);await loadRun(run.id)})}
-  function agentAction(reply:AgentReply){if(reply.action==='RUN'){openRun();setChat(false)}else if(reply.action==='DRAFTS'){go('drafts')}else if(reply.action==='EXPLAIN'){const result=results.find(r=>r.sku_id===reply.sku_id);if(result)setDialog({kind:'evidence',result})}else if(reply.action==='PRICE'){const result=results.find(r=>r.sku_id===reply.sku_id);if(result){setDialog({kind:'correction',result,exception:exceptions.find(e=>e.result_id===result.id&&e.status==='OPEN'&&e.code==='MISSING_PRICE'),price:reply.unit_price||undefined});setChat(false)}}}
-  const badgeCount=run?.blocked_count||0
-  return <div className="app-shell"><aside className={`sidebar ${mobileMenu?'mobile-open':''}`}><a href="#dashboard" className="brand" onClick={()=>go('dashboard')}><span className="brand-mark"><Layers3 size={24}/></span><span>Supplydesk<small>PROCUREMENT WORKSPACE</small></span></a><div className="workspace-switch"><span className="workspace-avatar">S</span><span>Synthetic Office Co.<small>Single warehouse workspace</small></span><ChevronDown size={14}/></div><span className="nav-eyebrow">WORKSPACE</span><nav>{navigation.map(item=><button key={item.id} className={screen===item.id?'active':''} onClick={()=>go(item.id)}><item.icon size={18}/><span>{item.label}</span>{item.id==='exceptions'&&badgeCount>0&&<span className="nav-count">{badgeCount}</span>}{item.id==='drafts'&&drafts.filter(d=>d.lines.length&&d.status!=='APPROVED').length>0&&<span className="nav-count quiet">{drafts.filter(d=>d.lines.length&&d.status!=='APPROVED').length}</span>}</button>)}</nav><div className="sidebar-bottom"><div className="agent-invite"><span><Bot size={19}/> A little help, right here</span><p>Ask about a decision or find your next step.</p><button onClick={()=>{setChat(true);setMobileMenu(false)}}>Ask procurement agent<ArrowUpRight size={15}/></button></div><button className="side-support" onClick={()=>setDialog({kind:'help'})}><CircleHelp size={17}/>Quick guide<ArrowUpRight size={14}/></button><button className="profile" onClick={()=>setDialog({kind:'connection'})}><span className="profile-avatar">PR</span><span>Procurement reviewer<small>Local demo workspace</small></span><Settings2 size={15}/></button></div></aside>
-    {mobileMenu&&<button className="mobile-scrim" aria-label="Close navigation" onClick={()=>setMobileMenu(false)}/>}
-    <div className="main-shell"><header className="topbar"><div className="breadcrumb"><button className="icon-button mobile-toggle" aria-label="Open navigation" onClick={()=>setMobileMenu(true)}><Menu size={20}/></button><span>Workspace</span><span>/</span><strong>{navigation.find(n=>n.id===screen)?.label}</strong></div><div className="topbar-right"><span className="synthetic-tag">SYNTHETIC DATA</span><button className="icon-button notification" aria-label="Open exceptions" onClick={()=>go('exceptions')}><Bell size={18}/>{badgeCount>0&&<i/>}</button><span className="top-avatar">PR</span></div></header>
-      <div className="runbar"><div><span className="run-label">CURRENT REVIEW</span><label className="run-select"><select aria-label="Current procurement run" value={activeId} disabled={busy} onChange={e=>void selectRun(e.target.value)}>{!runs.length&&<option value="">No run yet</option>}{runs.map(r=><option key={r.id} value={r.id}>{r.as_of} · RUN-{shortId(r.id)}</option>)}</select><ChevronDown size={14}/></label>{run&&<Badge status={run.status}/>}</div><button className="refresh" disabled={busy||loading} onClick={()=>void bootstrap()}><RefreshCw size={14} className={loading?'spin':''}/>{loading?'Updating':'Refresh'}</button></div>
-      <main>{error&&<div className="global-error"><ErrorNotice message={error} onRetry={()=>void bootstrap()}/><button className="text-link" onClick={()=>setDialog({kind:'connection'})}>Connection settings</button></div>}{busy&&<div className="working" role="status"><RefreshCw size={14} className="spin"/> Waiting for backend confirmation…</div>}
-      {loading&&!run&&screen!=='data'?<Loading/>:<>
-      {screen==='dashboard'&&<Dashboard run={run} results={results} exceptions={exceptions} drafts={drafts} onGo={go} onRun={()=>openRun()} onEvidence={result=>setDialog({kind:'evidence',result})} busy={busy}/>}
-      {screen==='data'&&<DataScreen batches={batches} busy={busy} onUpload={upload} onDemo={s=>void loadDemo(s).catch(()=>{})} onRun={b=>openRun(b)}/>}
-      {screen==='skus'&&<SKUScreen results={results} run={run} onEvidence={result=>setDialog({kind:'evidence',result})}/>}
-      {screen==='exceptions'&&<ExceptionScreen exceptions={exceptions} results={results} onResolve={(exception,result)=>setDialog({kind:'correction',exception,result})} onEvidence={result=>setDialog({kind:'evidence',result})}/>}
-      {screen==='drafts'&&<DraftScreen drafts={drafts} busy={busy} onEdit={(draft,line)=>setDialog({kind:'edit',draft,line})} onReview={(draft,reject)=>setDialog({kind:'review',draft,reject})} onExport={d=>void exportPO(d).catch(()=>{})} onEvidence={id=>{const result=results.find(r=>r.id===id);if(result)setDialog({kind:'evidence',result})}} onHistory={d=>void history(d).catch(()=>{})} onSync={()=>void sync().catch(()=>{})}/>}
-      {screen==='audit'&&<AuditScreen run={run} runs={runs} batches={batches} events={events} busy={busy} onRun={id=>{void selectRun(id);go('dashboard')}} onMore={()=>void execute('',async()=>{const next=await api.audit(auditOffset.current+50);auditOffset.current+=50;setEvents(old=>[...old,...next.filter(e=>!old.some(p=>p.id===e.id))]);if(!next.length)notify('You have reached the end of the action log.')}).catch(()=>{})}/>}
-      </>}</main>
+  const closeDialog = useCallback(() => setDialog(null), [])
+  const go = (value: Screen) => {
+    setScreen(value)
+    location.hash = value
+    setMobileMenu(false)
+  }
+  const notify = (message: string) => setToast(message)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 7000)
+    return () => clearTimeout(t)
+  }, [toast])
+  useEffect(() => {
+    const fn = () => setScreen(initialScreen())
+    window.addEventListener('hashchange', fn)
+    return () => window.removeEventListener('hashchange', fn)
+  }, [])
+  const loadRun = useCallback(async (id: string) => {
+    const seq = ++generation.current
+    setLoading(true)
+    try {
+      const [r, s, e, d] = await Promise.all([
+        api.run(id),
+        api.results(id),
+        api.exceptions(id),
+        api.drafts(id),
+      ])
+      if (seq !== generation.current) return
+      setRun(r)
+      setResults(s.sort((a, b) => a.sku_id.localeCompare(b.sku_id)))
+      setExceptions(e)
+      setDrafts(d.sort((a, b) => a.supplier_id.localeCompare(b.supplier_id)))
+    } finally {
+      if (seq === generation.current) setLoading(false)
+    }
+  }, [])
+  const bootstrap = useCallback(async () => {
+    setError('')
+    setLoading(true)
+    try {
+      const [r, b] = await Promise.all([api.runs(), api.batches()])
+      setRuns(r)
+      setBatches(b)
+      const saved = sessionStorage.getItem('supplydesk-run')
+      const id = r.find((v) => v.id === currentId.current || v.id === saved)?.id || r[0]?.id || ''
+      if (id) {
+        setActiveId(id)
+        currentId.current = id
+        await loadRun(id)
+      } else {
+        setRun(null)
+        setResults([])
+        setExceptions([])
+        setDrafts([])
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to load workspace')
+    } finally {
+      setLoading(false)
+    }
+  }, [loadRun])
+  useEffect(() => {
+    void bootstrap()
+  }, [bootstrap, credentials])
+  useEffect(() => {
+    if (screen === 'audit') {
+      auditOffset.current = 0
+      void api
+        .audit()
+        .then(setEvents)
+        .catch((e) => setError(e.message))
+    }
+  }, [screen, activeId])
+  const selectRun = async (id: string) => {
+    if (busy || !id) return
+    setError('')
+    setActiveId(id)
+    currentId.current = id
+    sessionStorage.setItem('supplydesk-run', id)
+    setRun(null)
+    setResults([])
+    setExceptions([])
+    setDrafts([])
+    try {
+      await loadRun(id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to open run')
+    }
+  }
+  async function execute<T>(label: string, action: () => Promise<T>): Promise<T> {
+    setBusy(true)
+    setError('')
+    try {
+      const value = await action()
+      if (label) notify(label)
+      return value
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Operation failed')
+      throw e
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function refreshAfterMutation(id: string, sync = false) {
+    try {
+      if (sync) await api.resume(id)
+      const [r, b] = await Promise.all([api.runs(), api.batches()])
+      setRuns(r)
+      setBatches(b)
+      await loadRun(id)
+    } catch (e) {
+      setError(
+        `Your change was saved, but the workspace refresh or draft synchronization failed. Refresh the page and use Sync drafts before another review. ${e instanceof Error ? e.message : ''}`,
+      )
+    }
+  }
+  function openRun(batch?: Batch, initial?: Partial<RunRequest>) {
+    const chosen = batch || batches.find((b) => b.status.startsWith('VALIDATED'))
+    if (!chosen) {
+      go('data')
+      notify('Load a demo scenario or upload a validated dataset first.')
+      return
+    }
+    const inventory = chosen.raw_data?.inventory_snapshot?.[0],
+      supplier = chosen.raw_data?.supplier_master?.find((s) => s.currency)
+    setDialog({
+      kind: 'run',
+      initial: {
+        batch_id: chosen.id,
+        as_of: typeof inventory?.snapshot_date === 'string' ? inventory.snapshot_date : undefined,
+        currency: typeof supplier?.currency === 'string' ? supplier.currency : '',
+        warehouse: chosen.filename.startsWith('synthetic-')
+          ? 'SYNTHETIC-WH-1'
+          : run?.warehouse || '',
+        ...initial,
+      },
+    })
+  }
+  async function startCheck(policy: RunRequest) {
+    await execute('', async () => {
+      const report = await api.review(policy)
+      setDialog(null)
+      setActiveId(report.run.id)
+      currentId.current = report.run.id
+      sessionStorage.setItem('supplydesk-run', report.run.id)
+      await refreshAfterMutation(report.run.id)
+      go('dashboard')
+      notify(
+        `Check confirmed: ${report.run.processed_count} SKUs scanned, ${report.run.blocked_count} blocked. Drafts await human review.`,
+      )
+    })
+  }
+  async function loadDemo(scenario: string) {
+    await execute('', async () => {
+      const demo = await api.demo(scenario)
+      const batch = await api.importJson(demo.dataset, 'synthetic-' + scenario + '.json')
+      setBatches(await api.batches())
+      if (!batch.status.startsWith('VALIDATED'))
+        throw new Error(
+          'Scenario import was rejected. Review the validation issues in Data intake.',
+        )
+      openRun({ ...batch, filename: `synthetic-${scenario}` }, demo.policy)
+      notify('Synthetic dataset imported. Confirm the policy to run the check.')
+    })
+  }
+  async function upload(files: File[]) {
+    await execute('', async () => {
+      if (!files.length) throw new Error('Choose at least one file.')
+      let batch: Batch
+      if (files.some((f) => f.name.toLowerCase().endsWith('.json'))) {
+        if (files.length !== 1)
+          throw new Error('Upload one JSON dataset at a time, separately from CSV or Excel files.')
+        if (files[0].size > 10 * 1024 * 1024) throw new Error('Upload exceeds 10 MB.')
+        batch = await api.importJson(JSON.parse(await files[0].text()), files[0].name)
+      } else batch = await api.upload(files)
+      setBatches(await api.batches())
+      if (batch.status === 'REJECTED') {
+        setError('Import rejected. Expand the batch below to review the validation errors.')
+        return
+      }
+      notify(
+        batch.issues.length
+          ? 'Imported with validation warnings. Review the recorded issues before running.'
+          : 'Input structure validated. Ready for the procurement check.',
+      )
+      openRun(batch)
+    })
+  }
+  async function saveCorrection(context: Context, reason: string) {
+    if (dialog?.kind !== 'correction' || !run) return
+    const { result, exception } = dialog
+    const id = result.run_id
+    await execute('', async () => {
+      const updated = exception
+        ? await api.resolve(exception.id, result.revision, context, reason)
+        : (await api.correct(id, result.sku_id, result.revision, context, reason)).result
+      setDialog(null)
+      notify(`${updated.sku_id} correction saved and rechecked: ${updated.status}.`)
+      await refreshAfterMutation(id, true)
+    })
+  }
+  async function saveLine(q: number, p: string, r: string) {
+    if (dialog?.kind !== 'edit') return
+    const { draft, line } = dialog
+    await execute('', async () => {
+      await api.edit(draft, line.id, q, p, r)
+      setDialog(null)
+      notify('Line saved. Previous approval is invalidated; this PO needs a new review.')
+      await refreshAfterMutation(draft.run_id)
+    })
+  }
+  async function review(comment: string) {
+    if (dialog?.kind !== 'review') return
+    const { draft, reject } = dialog
+    await execute('', async () => {
+      await (reject ? api.reject(draft, comment) : api.approve(draft, comment))
+      setDialog(null)
+      notify(
+        reject
+          ? 'Rejection recorded by the backend.'
+          : 'Human approval recorded. This version can now be exported.',
+      )
+      await refreshAfterMutation(draft.run_id)
+    })
+  }
+  async function exportPO(d: Draft) {
+    await execute('Approved purchase order exported.', async () => {
+      const blob = await api.export(d.id),
+        url = URL.createObjectURL(blob),
+        link = document.createElement('a')
+      link.href = url
+      link.download = `PO-${d.id}.csv`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    })
+  }
+  async function history(d: Draft) {
+    await execute('', async () => {
+      const data = await api.history(d.id)
+      setDialog({ kind: 'history', draft: d, events: data })
+    })
+  }
+  async function sync() {
+    if (!run) {
+      openRun()
+      return
+    }
+    await execute('Drafts synchronized with the current SKU decisions.', async () => {
+      await api.resume(run.id)
+      await loadRun(run.id)
+    })
+  }
+  function agentAction(reply: AgentReply) {
+    if (reply.action === 'RUN') {
+      openRun()
+      setChat(false)
+    } else if (reply.action === 'DRAFTS') {
+      go('drafts')
+    } else if (reply.action === 'EXPLAIN') {
+      const result = results.find((r) => r.sku_id === reply.sku_id)
+      if (result) setDialog({ kind: 'evidence', result })
+    } else if (reply.action === 'PRICE') {
+      const result = results.find((r) => r.sku_id === reply.sku_id)
+      if (result) {
+        setDialog({
+          kind: 'correction',
+          result,
+          exception: exceptions.find(
+            (e) => e.result_id === result.id && e.status === 'OPEN' && e.code === 'MISSING_PRICE',
+          ),
+          price: reply.unit_price || undefined,
+        })
+        setChat(false)
+      }
+    }
+  }
+  const badgeCount = run?.blocked_count || 0
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileMenu ? 'mobile-open' : ''}`}>
+        <a href="#dashboard" className="brand" onClick={() => go('dashboard')}>
+          <span className="brand-mark">
+            <Layers3 size={24} />
+          </span>
+          <span>
+            Supplydesk<small>PROCUREMENT WORKSPACE</small>
+          </span>
+        </a>
+        <div className="workspace-switch">
+          <span className="workspace-avatar">S</span>
+          <span>
+            Synthetic Office Co.<small>Single warehouse workspace</small>
+          </span>
+          <ChevronDown size={14} />
+        </div>
+        <span className="nav-eyebrow">WORKSPACE</span>
+        <nav>
+          {navigation.map((item) => (
+            <button
+              key={item.id}
+              className={screen === item.id ? 'active' : ''}
+              onClick={() => go(item.id)}
+            >
+              <item.icon size={18} />
+              <span>{item.label}</span>
+              {item.id === 'exceptions' && badgeCount > 0 && (
+                <span className="nav-count">{badgeCount}</span>
+              )}
+              {item.id === 'drafts' &&
+                drafts.filter((d) => d.lines.length && d.status !== 'APPROVED').length > 0 && (
+                  <span className="nav-count quiet">
+                    {drafts.filter((d) => d.lines.length && d.status !== 'APPROVED').length}
+                  </span>
+                )}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="agent-invite">
+            <span>
+              <Bot size={19} /> A little help, right here
+            </span>
+            <p>Ask about a decision or find your next step.</p>
+            <button
+              onClick={() => {
+                setChat(true)
+                setMobileMenu(false)
+              }}
+            >
+              Ask procurement agent
+              <ArrowUpRight size={15} />
+            </button>
+          </div>
+          <button className="side-support" onClick={() => setDialog({ kind: 'help' })}>
+            <CircleHelp size={17} />
+            Quick guide
+            <ArrowUpRight size={14} />
+          </button>
+          <button className="profile" onClick={() => setDialog({ kind: 'connection' })}>
+            <span className="profile-avatar">PR</span>
+            <span>
+              Procurement reviewer<small>Local demo workspace</small>
+            </span>
+            <Settings2 size={15} />
+          </button>
+        </div>
+      </aside>
+      {mobileMenu && (
+        <button
+          className="mobile-scrim"
+          aria-label="Close navigation"
+          onClick={() => setMobileMenu(false)}
+        />
+      )}
+      <div className="main-shell">
+        <header className="topbar">
+          <div className="breadcrumb">
+            <button
+              className="icon-button mobile-toggle"
+              aria-label="Open navigation"
+              onClick={() => setMobileMenu(true)}
+            >
+              <Menu size={20} />
+            </button>
+            <span>Workspace</span>
+            <span>/</span>
+            <strong>{navigation.find((n) => n.id === screen)?.label}</strong>
+          </div>
+          <div className="topbar-right">
+            <span className="synthetic-tag">SYNTHETIC DATA</span>
+            <button
+              className="icon-button notification"
+              aria-label="Open exceptions"
+              onClick={() => go('exceptions')}
+            >
+              <Bell size={18} />
+              {badgeCount > 0 && <i />}
+            </button>
+            <span className="top-avatar">PR</span>
+          </div>
+        </header>
+        <div className="runbar">
+          <div>
+            <span className="run-label">CURRENT REVIEW</span>
+            <label className="run-select">
+              <select
+                aria-label="Current procurement run"
+                value={activeId}
+                disabled={busy}
+                onChange={(e) => void selectRun(e.target.value)}
+              >
+                {!runs.length && <option value="">No run yet</option>}
+                {runs.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.as_of} · RUN-{shortId(r.id)}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} />
+            </label>
+            {run && <Badge status={run.status} />}
+          </div>
+          <button className="refresh" disabled={busy || loading} onClick={() => void bootstrap()}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            {loading ? 'Updating' : 'Refresh'}
+          </button>
+        </div>
+        <main>
+          {error && (
+            <div className="global-error">
+              <ErrorNotice message={error} onRetry={() => void bootstrap()} />
+              <button className="text-link" onClick={() => setDialog({ kind: 'connection' })}>
+                Connection settings
+              </button>
+            </div>
+          )}
+          {busy && (
+            <div className="working" role="status">
+              <RefreshCw size={14} className="spin" /> Waiting for backend confirmation…
+            </div>
+          )}
+          {loading && !run && screen !== 'data' ? (
+            <Loading />
+          ) : (
+            <>
+              {screen === 'dashboard' && (
+                <Dashboard
+                  run={run}
+                  results={results}
+                  exceptions={exceptions}
+                  drafts={drafts}
+                  onGo={go}
+                  onRun={() => openRun()}
+                  onResume={() => void sync().catch(() => {})}
+                  onEvidence={(result) => setDialog({ kind: 'evidence', result })}
+                  busy={busy}
+                />
+              )}
+              {screen === 'data' && (
+                <DataScreen
+                  batches={batches}
+                  busy={busy}
+                  onUpload={upload}
+                  onDemo={(s) => void loadDemo(s).catch(() => {})}
+                  onRun={(b) => openRun(b)}
+                />
+              )}
+              {screen === 'skus' && (
+                <SKUScreen
+                  results={results}
+                  run={run}
+                  onEvidence={(result) => setDialog({ kind: 'evidence', result })}
+                />
+              )}
+              {screen === 'exceptions' && (
+                <ExceptionScreen
+                  exceptions={exceptions}
+                  results={results}
+                  onResolve={(exception, result) =>
+                    setDialog({ kind: 'correction', exception, result })
+                  }
+                  onEvidence={(result) => setDialog({ kind: 'evidence', result })}
+                />
+              )}
+              {screen === 'drafts' && (
+                <DraftScreen
+                  drafts={drafts}
+                  busy={busy}
+                  onEdit={(draft, line) => setDialog({ kind: 'edit', draft, line })}
+                  onReview={(draft, reject) => setDialog({ kind: 'review', draft, reject })}
+                  onExport={(d) => void exportPO(d).catch(() => {})}
+                  onEvidence={(id) => {
+                    const result = results.find((r) => r.id === id)
+                    if (result) setDialog({ kind: 'evidence', result })
+                  }}
+                  onHistory={(d) => void history(d).catch(() => {})}
+                  onSync={() => void sync().catch(() => {})}
+                />
+              )}
+              {screen === 'audit' && (
+                <AuditScreen
+                  run={run}
+                  runs={runs}
+                  batches={batches}
+                  events={events}
+                  busy={busy}
+                  onRun={(id) => {
+                    void selectRun(id)
+                    go('dashboard')
+                  }}
+                  onMore={() =>
+                    void execute('', async () => {
+                      const next = await api.audit(auditOffset.current + 50)
+                      auditOffset.current += 50
+                      setEvents((old) => [
+                        ...old,
+                        ...next.filter((e) => !old.some((p) => p.id === e.id)),
+                      ])
+                      if (!next.length) notify('You have reached the end of the action log.')
+                    }).catch(() => {})
+                  }
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
+      {!chat && (
+        <button className="agent-launcher" onClick={() => setChat(true)}>
+          <Bot size={20} />
+          <span>Ask agent</span>
+          <span className="agent-dot" />
+        </button>
+      )}
+      {chat && (
+        <AgentPanel
+          key={run?.id || 'no-run'}
+          runId={run?.id}
+          onClose={() => setChat(false)}
+          onAction={agentAction}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <CheckCheck size={20} />
+          <span>{toast}</span>
+          <button
+            className="icon-button"
+            onClick={() => setToast('')}
+            aria-label="Dismiss notification"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+      {dialog?.kind === 'run' && (
+        <RunForm
+          batches={batches}
+          initial={dialog.initial}
+          onSubmit={startCheck}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'evidence' && (
+        <Modal
+          title="SKU decision evidence"
+          subtitle="Values and reasoning confirmed by the backend."
+          wide
+          onClose={closeDialog}
+        >
+          <div className="modal-body">
+            <Evidence result={dialog.result} />
+            <div className="modal-actions">
+              <Button
+                kind="secondary"
+                onClick={() => {
+                  const result = dialog.result
+                  setDialog({ kind: 'correction', result })
+                }}
+              >
+                Correct source data
+              </Button>
+              <Button
+                onClick={() => {
+                  closeDialog()
+                  go('exceptions')
+                }}
+              >
+                Open exception center
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {dialog?.kind === 'correction' && (
+        <CorrectionForm
+          result={dialog.result}
+          exception={dialog.exception}
+          price={dialog.price}
+          onSave={saveCorrection}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'edit' && (
+        <EditLineForm
+          draft={dialog.draft}
+          line={dialog.line}
+          onSave={saveLine}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'review' && (
+        <ReviewForm
+          draft={dialog.draft}
+          reject={dialog.reject}
+          onSave={review}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'history' && (
+        <Modal
+          title="Approval history"
+          subtitle={`${dialog.draft.supplier_name} · PO-${shortId(dialog.draft.id)}`}
+          onClose={closeDialog}
+        >
+          <div className="modal-body">
+            <History events={dialog.events} />
+          </div>
+        </Modal>
+      )}
+      {dialog?.kind === 'connection' && (
+        <ConnectionForm
+          value={credentials}
+          onClose={closeDialog}
+          onSave={(v) => {
+            sessionStorage.setItem('supplydesk-access', JSON.stringify(v))
+            saveCredentials(v)
+            closeDialog()
+          }}
+        />
+      )}
+      {dialog?.kind === 'help' && (
+        <Modal title="Your daily procurement workflow" onClose={closeDialog}>
+          <div className="modal-body quick-guide">
+            {[
+              [
+                '01',
+                'Load and validate',
+                'Upload the six source tables or choose a synthetic demo scenario.',
+              ],
+              [
+                '02',
+                'Check every SKU',
+                'Run the daily check and review each decision. Blocked is never treated as no reorder.',
+              ],
+              [
+                '03',
+                'Resolve what is missing',
+                'Use the exception form to correct source data. The backend reruns the SKU and refreshes drafts.',
+              ],
+              [
+                '04',
+                'Review and approve',
+                'Check source evidence, quantities and dates. Approval is explicit; critical edits require a new review.',
+              ],
+              [
+                '05',
+                'Export the approved order',
+                'Only approved versions can be exported. The audit trail records every action.',
+              ],
+            ].map(([n, title, text]) => (
+              <div key={n}>
+                <span>{n}</span>
+                <div>
+                  <h3>{title}</h3>
+                  <p>{text}</p>
+                </div>
+              </div>
+            ))}
+            <p className="notice soft">
+              <ShieldCheck size={18} />
+              All demonstration values are synthetic. Orders are not sent to suppliers.
+            </p>
+          </div>
+        </Modal>
+      )}
     </div>
-    {!chat&&<button className="agent-launcher" onClick={()=>setChat(true)}><Bot size={20}/><span>Ask agent</span><span className="agent-dot"/></button>}{chat&&<AgentPanel runId={run?.id} onClose={()=>setChat(false)} onAction={agentAction}/>}
-    {toast&&<div className="toast" role="status"><CheckCheck size={20}/><span>{toast}</span><button className="icon-button" onClick={()=>setToast('')} aria-label="Dismiss notification"><X size={15}/></button></div>}
-    {dialog?.kind==='run'&&<RunForm batches={batches} initial={dialog.initial} onSubmit={startCheck} onClose={closeDialog}/>}
-    {dialog?.kind==='evidence'&&<Modal title="SKU decision evidence" subtitle="Values and reasoning confirmed by the backend." wide onClose={closeDialog}><div className="modal-body"><Evidence result={dialog.result}/><div className="modal-actions"><Button kind="secondary" onClick={()=>{const result=dialog.result;setDialog({kind:'correction',result})}}>Correct source data</Button><Button onClick={()=>{closeDialog();go('exceptions')}}>Open exception center</Button></div></div></Modal>}
-    {dialog?.kind==='correction'&&<CorrectionForm result={dialog.result} exception={dialog.exception} price={dialog.price} onSave={saveCorrection} onClose={closeDialog}/>}
-    {dialog?.kind==='edit'&&<EditLineForm draft={dialog.draft} line={dialog.line} onSave={saveLine} onClose={closeDialog}/>}
-    {dialog?.kind==='review'&&<ReviewForm draft={dialog.draft} reject={dialog.reject} onSave={review} onClose={closeDialog}/>}
-    {dialog?.kind==='history'&&<Modal title="Approval history" subtitle={`${dialog.draft.supplier_name} · PO-${shortId(dialog.draft.id)}`} onClose={closeDialog}><div className="modal-body"><History events={dialog.events}/></div></Modal>}
-    {dialog?.kind==='connection'&&<ConnectionForm value={credentials} onClose={closeDialog} onSave={v=>{sessionStorage.setItem('supplydesk-access',JSON.stringify(v));saveCredentials(v);closeDialog()}}/>}
-    {dialog?.kind==='help'&&<Modal title="Your daily procurement workflow" onClose={closeDialog}><div className="modal-body quick-guide">{[['01','Load and validate','Upload the six source tables or choose a synthetic demo scenario.'],['02','Check every SKU','Run the daily check and review each decision. Blocked is never treated as no reorder.'],['03','Resolve what is missing','Use the exception form to correct source data. The backend reruns the SKU and refreshes drafts.'],['04','Review and approve','Check source evidence, quantities and dates. Approval is explicit; critical edits require a new review.'],['05','Export the approved order','Only approved versions can be exported. The audit trail records every action.']].map(([n,title,text])=><div key={n}><span>{n}</span><div><h3>{title}</h3><p>{text}</p></div></div>)}<p className="notice soft"><ShieldCheck size={18}/>All demonstration values are synthetic. Orders are not sent to suppliers.</p></div></Modal>}
-  </div>
+  )
 }

@@ -1,6 +1,6 @@
-# SME Procurement Agent 后端
+# SME Procurement Agent
 
-> 当前上传是开发进度备份：后端已实现；`frontend/` 为进行中的前端源码，尚缺样式文件和浏览器验收，当前不能完成前端构建。详细状态见 [开发进度](docs/DEVELOPMENT_STATUS.md)。
+前后端已完成联调：提供采购概览、数据导入、SKU 检查、异常修正、采购单审批、审计页面和 Agent 面板。详见 [前端启动与演示](frontend/README.md) 和 [开发状态](docs/DEVELOPMENT_STATUS.md)。
 
 基于 `biz module` 的采购 Agent MVP：导入合成数据 → 校验 → 全量 SKU 检查 → 异常修正和重算 → 按供应商生成草稿 → 人工审批 → CSV 导出。业务状态和审计保存在 PostgreSQL。
 
@@ -14,7 +14,7 @@ docker compose up --build -d
 docker compose exec api python -m backend.demo --date 2026-09-27
 ```
 
-服务 `http://localhost:8000`；交互文档 `http://localhost:8000/docs`。
+前端页面 `http://localhost:8000`；交互文档 `http://localhost:8000/docs`。Docker 镜像同时构建前端。
 Compose 等待数据库健康、执行迁移后启动 API，数据库使用持久卷。
 
 本地 Python 3.12+、uv 和 PostgreSQL：
@@ -27,6 +27,8 @@ uv run alembic upgrade head
 uv run python -m backend.demo --date 2026-09-27
 uv run uvicorn backend.main:app --reload
 ```
+
+本地开发前端另开终端，在 `frontend` 目录执行 `npm ci`、`npm run dev`，访问 `http://127.0.0.1:5173`。若希望由后端统一提供页面，先执行 `npm run build`，再启动后端，访问 8000 端口。
 
 本次已创建项目 `.venv`。当前终端没有 python 命令时，也可直接执行：
 
