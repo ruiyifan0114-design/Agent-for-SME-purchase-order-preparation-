@@ -1,12 +1,144 @@
-# SME Procurement Agent
+# Supplydesk — SME Procurement Agent
 
-前后端已完成联调：提供采购概览、数据导入、SKU 检查、异常修正、采购单审批、审计页面和 Agent 面板。详见 [前端启动与演示](frontend/README.md) 和 [开发状态](docs/DEVELOPMENT_STATUS.md)。
+Supplydesk 是一个面向中小企业采购团队的可审计采购准备 Agent。它把分散的库存、需求、在途订单、供应商和价格数据汇总到一个工作区，逐一检查所有 SKU，计算补货建议，生成按供应商分组的采购单草稿，并把最终批准权留给采购人员。
 
-基于 `biz module` 的采购 Agent MVP：导入合成数据 → 校验 → 全量 SKU 检查 → 异常修正和重算 → 按供应商生成草稿 → 人工审批 → CSV 导出。业务状态和审计保存在 PostgreSQL。
+项目针对的是日常采购准备中最耗时、也最容易出错的一段流程：手工拼接表格、漏看早期缺货、使用过期价格、误选未批准供应商，以及无法解释订单数量如何得出。Supplydesk 让 Agent 负责整理、计算和追踪，让人负责异常判断和采购承诺。
+
+> 当前版本是单仓库、单币种、单审核人的 MVP。仓库中的公司、商品、金额和订单均为合成演示数据；系统不会连接真实 ERP、联系供应商或自动发出采购订单。
+
+## 核心功能
+
+### 1. 多源采购数据导入与校验
+
+系统支持六份 CSV、六个工作表的 Excel 文件或 JSON 数据，覆盖：
+
+- SKU 主数据和安全库存策略
+- 供应商主数据
+- SKU 与默认供应商的商业映射
+- 库存快照
+- 未来及逾期未履行需求
+- 未收货采购订单
+
+导入时会检查缺表、重复主键、未知 SKU、非法日期、无效数量、占位文本和冲突库存。结构错误的批次会被保存为 `REJECTED` 并展示具体问题，不会被当成“零库存”或“零需求”继续计算。
+
+### 2. 全量 SKU 补货检查
+
+每次运行都为每个有效 SKU 建立结果，因此未检查、已判断和被阻塞的商品都可见。最终状态只有三种：
+
+| 状态 | 含义 |
+| --- | --- |
+| `REORDER` | 预测库存低于安全库存，数据完整，可以生成补货建议 |
+| `NO_REORDER` | 检查周期内的库存水位满足安全库存，无需下单 |
+| `BLOCKED` | 缺少或冲突的数据使系统无法可靠判断，需要人工修正 |
+
+界面分别显示“扫描覆盖率”和“决策完成率”。即使部分 SKU 被阻塞，其余 SKU 仍可继续处理，而阻塞项不会进入采购单草稿。
+
+### 3. 可解释的确定性采购计算
+
+采购数量由纯业务规则计算，语言模型不参与数量、日期或金额运算。系统在每个需求日期以及检查周期终点建立库存检查点：
+
+```text
+projected_stock(day)
+  = on_hand
+  + open_po_arriving_on_or_before(day)
+  - demand_due_on_or_before(day)
+
+binding_point = 检查周期内 projected_stock 最低的日期
+
+若 binding_point.projected_stock < safety_stock：
+  raw_order_qty = target_stock - projected_stock
+  final_order_qty = 按 MOQ 和包装倍数向上取整
+否则：
+  NO_REORDER
+```
+
+这种按日期计算的方式能够保留短期缺口：晚到的在途订单不会掩盖此前已经发生的缺货。每个结果都保存时间线、关键日期、库存、需求、在途、供应商、价格、MOQ、包装倍数和交期证据，用户可以追溯最终建议。
+
+### 4. 异常修正与局部重算
+
+缺少库存、缺少价格、默认供应商缺失、供应商未批准、币种不一致、数据过期和冲突快照等问题会形成明确的异常任务。采购人员可以在表单中修正指定运行下的业务上下文，系统只重算受影响的 SKU，并保留原始导入数据和修订历史。
+
+交期风险和晚到在途订单作为警告展示；会破坏决策可靠性的缺失或冲突数据则阻止生成订单行。
+
+### 5. 采购单草稿与人工审批
+
+所有 `REORDER` 结果按供应商自动归并为采购单草稿。审核人可以检查来源证据、编辑数量和价格、批准或拒绝草稿，并在批准后导出 CSV。
+
+审批具有明确的安全边界：
+
+- Agent 和服务凭证不能批准采购单
+- 批准必须由审核人显式勾选确认并填写意见
+- 审批使用版本号校验，避免在旧页面上批准已经变化的草稿
+- 数量、价格、供应商来源或计算结果发生关键变化后，已有审批自动失效并回到 `NEEDS_REVIEW`
+- 只有处于 `APPROVED` 状态的草稿能够导出
+
+### 6. Agent 解释与完整审计
+
+右侧 Agent 面板可以解释已保存的判断、定位异常，并根据用户输入打开相应的修正表单。DeepSeek 只用于可选的自然语言意图识别；即使未配置模型，采购计算、异常判断和审批流程仍能完整运行。
+
+导入、检查、修正、草稿生成、编辑、批准、拒绝和导出都会写入 PostgreSQL 审计记录。运行上下文会被冻结，后续导入不会悄悄改变历史结论。
+
+## 工作流程
+
+```mermaid
+flowchart LR
+    A[CSV / Excel / JSON] --> B[结构与业务校验]
+    B -->|结构错误| C[Rejected batch]
+    B -->|可运行| D[全量 SKU 检查]
+    D --> E[NO_REORDER]
+    D --> F[BLOCKED 异常]
+    F --> G[人工修正与局部重算]
+    G --> D
+    D --> H[REORDER]
+    H --> I[按供应商生成 PO 草稿]
+    I --> J[人工审核]
+    J -->|修改| I
+    J -->|拒绝| K[Rejected draft]
+    J -->|批准| L[Approved CSV export]
+```
+
+## 设计原则
+
+**确定性优先。** 影响采购承诺的计算全部位于独立领域引擎中，相同输入得到相同结果，方便测试、复核和替换业务政策。
+
+**异常不静默。** 系统不会猜测缺失价格、库存、MOQ 或供应商批准状态。无法可靠判断时返回 `BLOCKED`，同时继续处理不受影响的 SKU。
+
+**人在关键回路中。** Agent 可以准备和解释，不能替采购人员批准订单。所有关键修改都会触发重新审核。
+
+**存储状态是真实来源。** 前端和 Agent 都读取数据库中的运行、证据、草稿版本与审计事件，不凭聊天上下文声称操作成功。
+
+**可恢复且防重复。** 中断后的检查会继续同一个运行；行锁、唯一约束、结果修订号和草稿版本共同防止重复订单行及过期审批。
+
+## 系统架构
+
+| 层 | 技术与职责 |
+| --- | --- |
+| Web 应用 | React 19、TypeScript、Vite；概览、导入、SKU、异常、PO 和审计六个页面 |
+| API | FastAPI；认证、输入验证、统一错误响应和静态前端托管 |
+| Agent | 可恢复的工作流编排；读取存储状态并选择下一步动作 |
+| 领域引擎 | Python、Pydantic、Decimal；确定性库存与补货计算 |
+| 数据层 | PostgreSQL、SQLAlchemy、Alembic；14 张业务表、事务、锁和审计 |
+| 可选模型 | DeepSeek；仅解析自然语言意图，不计算或审批 |
+
+```text
+frontend/          React 前端与 Playwright 浏览器测试
+backend/api/       REST API 与身份边界
+backend/agent/     Agent 编排和自然语言入口
+backend/domain/    导入规范化、数据模型和采购计算
+backend/skills/    采购工作流
+backend/tools/     数据库原子操作、审批和审计
+backend/models/    SQLAlchemy 表模型
+migrations/        Alembic 数据库迁移
+tests/             领域、API、控制和 PostgreSQL 集成测试
+biz module/        业务流程、规则、UAT 与衡量方案
+demo/              可安全使用的合成演示数据
+```
 
 ## 快速启动
 
-Docker Compose（需 Docker 引擎已启动）：
+### Docker Compose
+
+需要 Docker 引擎：
 
 ```powershell
 Copy-Item .env.example .env
@@ -14,162 +146,78 @@ docker compose up --build -d
 docker compose exec api python -m backend.demo --date 2026-09-27
 ```
 
-前端页面 `http://localhost:8000`；交互文档 `http://localhost:8000/docs`。Docker 镜像同时构建前端。
-Compose 等待数据库健康、执行迁移后启动 API，数据库使用持久卷。
+打开 http://localhost:8000；API 文档位于 http://localhost:8000/docs。Compose 会等待 PostgreSQL 就绪、执行迁移，再启动包含前端静态文件的 API 服务。
 
-本地 Python 3.12+、uv 和 PostgreSQL：
+### 本地开发
+
+需要 Python 3.12+、[uv](https://docs.astral.sh/uv/)、PostgreSQL 和 Node.js 22：
 
 ```powershell
 uv sync --locked
 Copy-Item .env.example .env
-# 在 .env 设置 PostgreSQL DATABASE_URL
+# 在 .env 中设置 DATABASE_URL
 uv run alembic upgrade head
 uv run python -m backend.demo --date 2026-09-27
 uv run uvicorn backend.main:app --reload
 ```
 
-本地开发前端另开终端，在 `frontend` 目录执行 `npm ci`、`npm run dev`，访问 `http://127.0.0.1:5173`。若希望由后端统一提供页面，先执行 `npm run build`，再启动后端，访问 8000 端口。
-
-本次已创建项目 `.venv`。当前终端没有 python 命令时，也可直接执行：
+另开终端启动前端：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
+cd frontend
+npm ci
+npm run dev
 ```
 
-`/health` 检查进程，`/ready` 检查数据库与迁移表。正式 schema 由 Alembic 管理，应用不自动建表。
+打开 http://127.0.0.1:5173。Vite 会把 API 请求代理到 8000 端口。生产模式下，在 `frontend` 运行 `npm run build` 后重启 FastAPI，即可由 8000 端口统一提供前后端。
 
-## 凭证与人工审批
+## 演示数据
 
-所有 `/api/v1` 接口要求 `X-API-Key`，开发默认值见 `.env.example`。
+`demo/` 包含六份 CSV、等价 JSON 和一次运行报告。固定演示日期为 `2026-09-27`，预期结果为：
 
-| 身份 | 配置 | 能力 |
+```text
+10 SKU / 3 suppliers
+6 REORDER / 1 NO_REORDER / 3 BLOCKED
+```
+
+前端还提供三个可直接运行的故事：标准采购、及时与延迟在途对比、三类异常修正。所有币种使用测试标识 `XTS`，金额为税前合成数据。
+
+## API 身份边界
+
+所有 `/api/v1` 接口要求 `X-API-Key`：
+
+| 身份 | 环境变量 | 权限 |
 | --- | --- | --- |
-| 服务 / Agent | `API_KEY` | 导入、检查、草稿、查询、导出已审批单据 |
-| 人工审核人 | `REVIEWER_API_KEY` | 以上能力 + 修正异常/来源、修改数量/价格、审批/拒绝 |
+| 服务 / Agent | `API_KEY` | 导入、检查、生成草稿、查询、导出已批准草稿 |
+| 人工审核人 | `REVIEWER_API_KEY` | 服务权限 + 修正来源、编辑草稿、批准和拒绝 |
 
-两种 Key 必须不同。审核人身份来自服务端 `REVIEWER_NAME`，不接受任意请求姓名。审批要求 `confirm: true` 和当前 `expected_version`。Agent 没有自动审批路径。这是单审核人 MVP 鉴权；外部部署应更换默认 Key 并接入团队身份系统和 HTTPS。
+两种 Key 必须不同。演示默认值位于 `.env.example`，对外部署前必须更换并启用 HTTPS。DeepSeek 密钥只由后端读取，可通过 `DEEPSEEK_API_KEY` 或被 Git 忽略的 `deepseek_api_key.txt` 配置，绝不能放入前端变量或仓库。
 
-## 演示
-
-`demo/` 提供六个 CSV、同内容的 `dataset.json` 和本次 PostgreSQL 实测 `run-report.json`。固定输入日期为 **2026-09-27**；报告中的 ID 只对应本次演示运行。
-
-商品名称/UOM 与 SUP-A/B/C 复用业务模板；所有数值都是合成示例，币种使用测试标识 **XTS**，不代表实际公司币种。金额为税前金额。
-
-```powershell
-# 按今天生成新 CSV/JSON，不写数据库
-uv run python -m backend.demo --write-files demo-local
-# 导入并运行，故意保留商业/库存异常
-uv run python -m backend.demo
-# 无故意设置的异常
-uv run python -m backend.demo --clean
-```
-
-演示预期：10 SKU / 3 供应商；`REORDER=6`、`NO_REORDER=1`、`BLOCKED=3`。CLI 不会批准采购单。
-
-## 前端最短调用链
-
-1. `POST /api/v1/imports`，body 为 `demo/dataset.json`；或 `/imports/upload` 上传 CSV/Excel。
-2. 检查批次 `status` 为 `VALIDATED` 或 `VALIDATED_WITH_ISSUES`。结构错误保存为 `REJECTED`，不能继续运行。
-3. `POST /api/v1/agent/review`，使用下方显式参数；返回摘要、草稿和异常。
-4. 人工修正异常后自动重算对应 SKU；调用 Agent resume 同步草稿。
-5. 人工审核草稿，使用审核人 Key 调用 approve，之后 export 下载 CSV。
-
-```json
-{
-  "batch_id": "替换为导入返回的 id",
-  "as_of": "2026-09-27",
-  "horizon": 14,
-  "currency": "XTS",
-  "warehouse": "SYNTHETIC-WH-1",
-  "inventory_max_age_days": 1,
-  "commercial_max_age_days": 30
-}
-```
-
-上述参数是明确的合成演示配置。实际运行必须显式传入，系统没有替团队决定实际币种或数据时效阈值。审批 body：
-
-```json
-{
-  "expected_version": 3,
-  "confirm": true,
-  "comment": "人工已检查数量、价格和交期风险"
-}
-```
-
-使用刚读取的草稿 `version`，不可固定使用示例值。数量/价格、默认供应商或来源重算都会使相关采购单回到 `NEEDS_REVIEW`，清除当前审批信息，保留历史。
-
-## 输入契约
-
-每批必须包含六张表；无需求或无在途也要提供空表/数组，不能把缺失文件误当成零需求。
-
-| 表 / CSV 文件名 / Excel sheet | 字段 |
-| --- | --- |
-| `sku_master` | sku_id, description, uom, active, safety_stock, target_stock |
-| `supplier_master` | supplier_id, supplier_name, approved, currency |
-| `supplier_sku` | sku_id, supplier_id, approved_for_sku, unit_price, currency, moq, pack_multiple, lead_time_days, updated_at |
-| `inventory_snapshot` | sku_id, on_hand, snapshot_date |
-| `demand` | sku_id, quantity, need_date |
-| `open_po` | sku_id, po_number, quantity, arrival_date, status |
-
-multipart 字段为 `files`：六个 UTF-8 CSV，或者包含六个同名 sheet 的 `.xlsx`。支持原始模板文件名 `supplier_master_template.csv`、`sku_supplier_map_template.csv` 和列别名 `sku`、`default_supplier_id`、映射表的 `approved`。description/UOM 由 SKU 主表提供。业务设计工作簿是规范文件，不是六张交易表的上传文件。
-
-日期为 `YYYY-MM-DD`，数量为非负整数，价格最多四位小数；行金额四舍五入到两位后求和。上传最多 10 MiB，每表最多 50,000 行。占位文本、NaN、非法数字规范化为 null，并记录原值/位置，需要该值的 SKU 进入 BLOCKED。主表重复 ID、未知 SKU、缺表或结构错误使批次 REJECTED。重复库存保留，检查时产生 DUPLICATE/CONFLICTING_INVENTORY。
-
-open_po.quantity 是未收货的剩余数量，demand 是未履行需求。过去到货日期的 OPEN PO 需要人工确认；CLOSED/CANCELLED 不计入在途。
-
-## 库存规则
-
-运行截止 `as_of + horizon`，含截止日。按需求日期和截止日计算累计在途、累计需求；过去未履行需求仍计入。
-
-```text
-projected(day) = on_hand + incoming(arrival <= day) - demand(need <= day)
-binding = projected 最低的日期
-若 binding.projected < safety_stock：
-  raw = target_stock - binding.projected
-  final = ceil(max(raw, moq) / pack_multiple) * pack_multiple
-否则 NO_REORDER
-```
-
-结果的 projected_stock / valid_incoming / demand_qty 对应 binding 日期，`evidence.timeline` 保存各日期计算。晚到订单不能掩盖早期缺货，到货等于需求日时可计入。UAT 示例 raw=36/MOQ=50/pack=10 → 50，raw=63 → 70。
-
-MOQ 和 pack 必须显式提供，不适用时分别填 0、1。`LATE_OPEN_PO`、`LEAD_TIME_RISK` 为人工可见警告；缺少库存、价格、默认映射、供应商批准或数据过期为阻塞。
-
-## 分层与状态
-
-```text
-backend/
-  api/       REST、身份边界、请求响应
-  agent/     唯一 ProcurementAgent，按存储状态选择下一步
-  skills/    五个业务工作流
-  tools/     原子动作、事务、审计
-  domain/    Pydantic、导入规范化、确定性计算
-  models/    14 张 SQLAlchemy 表
-  db/        PostgreSQL session
-migrations/  Alembic 固定版本迁移
-tests/       域规则、UAT、HTTP、PostgreSQL 并发测试
-```
-
-Agent 为可恢复的确定性工作流 Agent，不依赖 LLM/key。可在后续增加自然语言入口，但数量、日期、金额、审批状态仍由 domain/tools 决定。
-
-运行创建时冻结来源上下文，后续导入不修改旧运行。采购单行引用结果及 revision；历史评估保存在日志中。人工来源修正仅作用于指定运行/SKU，不改写原始导入。失败先回滚，再独立记录 FAILED；数据库完全不可用时返回错误和服务日志，不报假成功。
-
-每个 run 的写操作使用 PostgreSQL 行锁；run+supplier 唯一约束、每结果唯一 PO 行与版本检查防止重复草稿和过期审批。重复 `/check` 只处理未完成 SKU，显式 `/rerun` 才重算并使相关审批失效。
-
-接口详情见 [docs/api.md](docs/api.md)，业务映射见 [docs/business-decisions.md](docs/business-decisions.md)。正常 JSON 为 `{"data": ...}`，错误为 `{"error": {"code": ..., "message": ...}}`；CSV 为文件响应。
-
-## 测试
+## 测试与当前状态
 
 ```powershell
 uv run pytest -q
 uv run ruff check backend tests migrations
-# 先创建独立、可清空的 procurement_test 数据库
-$env:TEST_DATABASE_URL = 'postgresql+psycopg://procurement:procurement@localhost:5432/procurement_test'
-uv run pytest -q
-uv run alembic check
+cd frontend
+npm run build
+$env:FRONTEND_URL='http://127.0.0.1:8000'
+npm run test:e2e
 ```
 
-测试库名必须以 `_test` 结尾；测试创建/删除其中的测试表。SQLite 仅为快速测试替身，默认跳过 PostgreSQL 行锁并发用例。
+当前版本已通过：
 
-本次 PostgreSQL 16.15 完整测试、迁移 upgrade/downgrade/upgrade、`alembic check` 和合成数据运行均通过。Docker 配置提供 PostgreSQL 17，但本机 Docker 引擎未就绪，镜像构建未实测。上游 TestClient 有弃用提醒，不影响当前测试结果。
+- 70 项 PostgreSQL 后端与集成测试
+- 9 条真实 API 浏览器端到端流程
+- TypeScript 检查和 Vite 生产构建
+- Alembic 升级、降级、重新升级与 schema drift 检查
+- 1440px 桌面端和 390px 移动端视觉检查
 
-范围：单仓、单币种、默认供应商；不连接真实 ERP、不联系供应商、不发送订单。草稿落库是内部工作状态，最终订单只有审批后才可导出。不同 run 是独立评审，导出不会自动变成下一批的 open PO，下次导入应包含已确认的剩余在途订单。
+Docker 配置已经提供，但由于开发机当时没有可用 Docker 引擎，镜像构建尚未在本机实测。DeepSeek 行为通过替身响应测试，没有消耗真实模型调用。
+
+更详细的接口与验证信息见 [API 文档](docs/api.md)、[业务决策记录](docs/business-decisions.md)、[前端说明](frontend/README.md) 和 [验证记录](docs/verification.md)。
+
+## 项目边界
+
+本 MVP 采用单仓库、单币种和默认供应商策略。导出的文件是经过人工批准的采购准备结果，不会自动发送给供应商。不同运行相互独立；下一次运行所需的剩余在途订单应由新的输入数据明确提供。
+
+项目依据 `biz module` 中的流程基线、痛点分析、端到端场景、业务规则和衡量方案实现。当前界面不会虚构节省时间、准确率或投资回报；这些指标需要通过真实的人工基线与试运行数据后再评估。
