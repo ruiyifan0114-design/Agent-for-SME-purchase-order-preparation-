@@ -10,6 +10,7 @@ Updated 2026-09-28. Dataset and business values are synthetic.
 | SQLite tests | **84 passed**, PostgreSQL-only row-lock test skipped |
 | Static checks | `ruff check backend tests migrations agent.py` passed |
 | Alembic | SQLite upgrade → downgrade → upgrade passed; existing PostgreSQL demo upgrade and schema check passed |
+| Supabase | Project database initialized at migration `7b21e9c46f30`; 15 public tables; FastAPI `/ready` returned 200; effective `anon`/`authenticated` table access count is 0 |
 | Schema drift | `alembic check`: no new upgrade operations |
 | HTTP adapters | JSON, six CSVs, six-sheet XLSX through FastAPI tested |
 | Original Biz templates | Placeholder lead time normalized; missing commercial data blocked |
