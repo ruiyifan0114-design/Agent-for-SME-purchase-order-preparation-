@@ -3,6 +3,7 @@ services:
     name: supplydesk-api
     runtime: docker
     plan: free
+    region: singapore
     healthCheckPath: /ready
     envVars:
       - key: DATABASE_URL
