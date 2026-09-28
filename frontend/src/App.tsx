@@ -75,10 +75,11 @@ type Dialog =
   | { kind: 'account' }
   | { kind: 'help' }
 function initialCredentials(): Credentials {
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
   const defaults = {
-    service: 'local-service-change-me',
-    reviewer: 'local-reviewer-change-me',
-    finance: 'local-finance-change-me',
+    service: local ? 'local-service-change-me' : '',
+    reviewer: local ? 'local-reviewer-change-me' : '',
+    finance: local ? 'local-finance-change-me' : '',
   }
   try {
     return { ...defaults, ...JSON.parse(sessionStorage.getItem('supplydesk-access') || '{}') }

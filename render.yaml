@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: supplydesk-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /ready
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-flash
+      - key: API_KEY
+        generateValue: true
+      - key: REVIEWER_API_KEY
+        generateValue: true
+      - key: FINANCE_API_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: '["https://ruiyifan0114-design.github.io"]'

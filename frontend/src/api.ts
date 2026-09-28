@@ -18,6 +18,7 @@ import type {
 } from './types'
 
 let credentials: Credentials = { service: '', reviewer: '', finance: '' }
+const backendOrigin = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 export function setCredentials(value: Credentials) {
   credentials = value
 }
@@ -36,6 +37,13 @@ async function request<T>(
   options: RequestInit = {},
   human: boolean | 'finance' = false,
 ): Promise<T> {
+  if (!backendOrigin && location.hostname.endsWith('.github.io')) {
+    throw new ApiError(
+      0,
+      'DEPLOYMENT_NOT_CONFIGURED',
+      'The cloud backend is not configured yet. Set the GitHub repository variable VITE_API_BASE_URL to the HTTPS backend address and redeploy.',
+    )
+  }
   const headers = new Headers(options.headers)
   headers.set(
     'X-API-Key',
@@ -45,7 +53,7 @@ async function request<T>(
     headers.set('Content-Type', 'application/json')
   let response: Response
   try {
-    response = await fetch(`/api/v1${path}`, {
+    response = await fetch(`${backendOrigin}/api/v1${path}`, {
       ...options,
       headers,
       signal: AbortSignal.timeout(90000),
