@@ -1,5 +1,9 @@
 import os
 from datetime import date
+
+# Route tests exercise the explicitly enabled local-development compatibility mode.
+os.environ.setdefault("ALLOW_API_KEYS", "true")
+
 import pytest
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool

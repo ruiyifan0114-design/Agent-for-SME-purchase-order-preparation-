@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     supabase_url: str = ""
     supabase_audience: str = "authenticated"
-    allow_api_keys: bool = True
+    allow_api_keys: bool = False
 
 
 @lru_cache
