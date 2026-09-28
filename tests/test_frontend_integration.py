@@ -132,6 +132,29 @@ def test_deepseek_has_only_read_only_procurement_tools():
     assert not names & {"approve_po", "reject_po", "export_po", "update_po_line", "resolve_exception"}
 
 
+def test_chat_navigation_opens_requested_page_instead_of_new_run():
+    navigation = {"action": "NONE"}
+    request = MessageRequest(message="Open the data page", history=[])
+    messages._tool_result(None, request, "open_workspace_page", {"page": "data"}, navigation)
+    assert navigation["action"] == "NAVIGATE" and navigation["page"] == "data"
+    navigation = {"action": "NONE"}
+    request = MessageRequest(message="What should I review first?", history=[])
+    messages._tool_result(None, request, "open_workspace_page", {"page": "drafts"}, navigation)
+    assert navigation["action"] == "NONE"
+
+
+def test_open_ended_policy_questions_reach_model(monkeypatch):
+    monkeypatch.setattr(messages, "_provider_key", lambda: "test-only")
+    seen = []
+    def answer(tools, request, key):
+        seen.append(request.message)
+        return {"action": "NONE", "message": "Policy evidence"}
+    monkeypatch.setattr(messages, "_deepseek_reply", answer)
+    for question in ("How does approval work?", "变化原因是什么？", "Explain supplier concentration"):
+        messages.reply(None, MessageRequest(message=question, history=[], run_id="selected-run"))
+    assert len(seen) == 3
+
+
 def test_decision_cockpit_uses_stored_results_and_previous_run(t, start):
     first = start()
     second = start()

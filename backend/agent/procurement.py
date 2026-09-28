@@ -1,7 +1,7 @@
 """One bounded Procurement Agent. Stored state drives its next action.
 
-This MVP deliberately needs no LLM/key: the planning policy is explicit, repeatable,
-and has no path to human approval tools. A future language UI may invoke these skills.
+The deterministic review needs no model key. The separate chat module reads its
+results through bounded tools; neither workflow can grant human approval.
 """
 from backend.skills.workflows import POPreparation, ProcurementCheck
 

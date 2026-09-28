@@ -1,14 +1,15 @@
 # Verification record
 
-Date: 2026-09-27. Dataset and business values are synthetic.
+Updated 2026-09-28. Dataset and business values are synthetic.
 
 | Check | Result |
 | --- | --- |
 | Python | CPython 3.12.13, project-local virtual environment |
 | PostgreSQL | 16.15, isolated WSL instance on localhost:55432 |
-| Full test suite on PostgreSQL | **74 passed**, including simultaneous draft generation, cockpit, simulation and grounded agent brief endpoints |
+| Full test suite on PostgreSQL | **85 passed**, including concurrent draft generation, SGD threshold boundaries and manager role isolation |
+| SQLite tests | **84 passed**, PostgreSQL-only row-lock test skipped |
 | Static checks | `ruff check backend tests migrations agent.py` passed |
-| Alembic | upgrade → check → downgrade → upgrade passed against PostgreSQL |
+| Alembic | SQLite upgrade → downgrade → upgrade passed; existing PostgreSQL demo upgrade and schema check passed |
 | Schema drift | `alembic check`: no new upgrade operations |
 | HTTP adapters | JSON, six CSVs, six-sheet XLSX through FastAPI tested |
 | Original Biz templates | Placeholder lead time normalized; missing commercial data blocked |
@@ -16,12 +17,14 @@ Date: 2026-09-27. Dataset and business values are synthetic.
 | Demo run | 10 processed / 6 REORDER / 1 NO_REORDER / 3 BLOCKED |
 | Docker image | Configuration supplied; build not executed because local Docker engine was unavailable |
 | Frontend production build | TypeScript check and Vite build passed |
-| Browser workflows | **11 passed**, including cockpit, what-if simulation, Daily Brief, landing/auth/account UI and procurement workflows, Edge, production assets served on port 8000 with real API |
+| Browser workflows | **13 workflows**, including manual data entry → SGD 5,000 PO → Purchasing approval → Finance approval → export, immutable batch editing, duplication/deletion, chat navigation/history, all previous procurement workflows and mobile layout |
 | Visual inspection | Desktop 1440px and mobile 390px screenshots inspected; mobile overflow check passed |
-| DeepSeek provider | Failure and untrusted model output tested with stubs; live paid provider not called |
+| DeepSeek provider | Tool loop, failure handling, private-reasoning isolation and free-form routing tested with mocks; real provider smoke test completed in the preceding chatbot upgrade |
 
-The PostgreSQL test database was separate from the seeded demo database. Backend tests create/drop their own tables and require a database name ending `_test`. Browser tests create additional synthetic records in the local demo database, including approved and rejected test drafts. No external procurement orders were sent.
+Backend tests create/drop their own tables and require a PostgreSQL database name ending `_test`. This revision's browser tests use an isolated `.runtime` SQLite database and production assets on port 8010. Chat-provider responses are mocked in the navigation/history browser test. No external orders are sent. The browser profile is display-only; role-specific backend credentials grant access.
 
 There is one upstream Starlette TestClient deprecation warning about its httpx adapter; tests currently pass. No warning is suppressed.
 
-The temporary verification server was started at `http://127.0.0.1:8000` with the demo database on port 55432. These running processes are a local preview, not deployment or automatic startup services. For repeatable startup use the README instructions and an explicit DATABASE_URL; the supplied Compose configuration uses port 5432.
+Use the README startup instructions and an explicit DATABASE_URL; Compose uses port 5432. Upgrade existing installations with `alembic upgrade head`. Existing SGD approvals of 5,000 or above enter `FINANCE_REVIEW` and require Finance approval before export.
+
+Runtime caches, provider keys, generated builds and browser reports are ignored by Git. The source business documents remain unchanged. The outdated generated demo run report and duplicate development-status document were removed; this file is the single verification record.

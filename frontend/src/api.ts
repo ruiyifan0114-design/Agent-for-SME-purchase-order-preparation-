@@ -17,7 +17,7 @@ import type {
   SimulationInput,
 } from './types'
 
-let credentials: Credentials = { service: '', reviewer: '' }
+let credentials: Credentials = { service: '', reviewer: '', finance: '' }
 export function setCredentials(value: Credentials) {
   credentials = value
 }
@@ -31,9 +31,16 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}, human = false): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  human: boolean | 'finance' = false,
+): Promise<T> {
   const headers = new Headers(options.headers)
-  headers.set('X-API-Key', human ? credentials.reviewer : credentials.service)
+  headers.set(
+    'X-API-Key',
+    human === 'finance' ? credentials.finance : human ? credentials.reviewer : credentials.service,
+  )
   if (options.body && !(options.body instanceof FormData))
     headers.set('Content-Type', 'application/json')
   let response: Response
@@ -65,7 +72,7 @@ async function request<T>(path: string, options: RequestInit = {}, human = false
     return (await response.blob()) as T
   return (await response.json()).data as T
 }
-const post = <T>(path: string, body?: unknown, human = false) =>
+const post = <T>(path: string, body?: unknown, human: boolean | 'finance' = false) =>
   request<T>(
     path,
     { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) },
@@ -120,11 +127,20 @@ export const api = {
       { expected_version: draft.version, comment, confirm: true },
       true,
     ),
-  reject: (draft: Draft, comment: string) =>
+  reject: (draft: Draft, comment: string, finance = false) =>
     post<Draft>(
       `/drafts/${draft.id}/reject`,
       { expected_version: draft.version, comment, confirm: true },
-      true,
+      finance ? 'finance' : true,
+    ),
+  financeApprove: (draft: Draft, comment: string) =>
+    request<Draft>(
+      `/drafts/${draft.id}/finance-approve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ expected_version: draft.version, comment, confirm: true }),
+      },
+      'finance',
     ),
   export: (id: string) => request<Blob>(`/drafts/${id}/export`),
   message: (message: string, run_id?: string, sku_id?: string, history: ChatTurn[] = []) =>

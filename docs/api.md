@@ -27,6 +27,7 @@ Validation errors add `details` with field locations. CSV export returns a downl
 | GET | `/drafts/{id}` | Header, current version, lines, source references |
 | PATCH | `/drafts/{id}/lines/{line_id}` | Human quantity/price edit; invalidate approval |
 | POST | `/drafts/{id}/approve` | Explicit human approval |
+| POST | `/drafts/{id}/finance-approve` | Finance credential; SGD >=5,000 after Purchasing approval |
 | POST | `/drafts/{id}/reject` | Human rejection |
 | GET | `/drafts/{id}/export` | Approved-only pre-tax synthetic CSV |
 | GET | `/drafts/{id}/history` | Approval/rejection/invalidation/export snapshots |
@@ -70,13 +71,13 @@ At least one of quantity/unit_price is required. MOQ and pack constraints still 
 {"expected_version":4,"confirm":true,"comment":"Reviewed price, quantities, and lead-time warnings"}
 ```
 
-Every mutation changes the relevant version/revision. On `409 VERSION_CONFLICT`, refresh and ask the user to review the new data. `403 HUMAN_REQUIRED` means the service credential cannot perform this action. `409 APPROVAL_REQUIRED` prevents final export. `409 PO_AMOUNT_MISMATCH` blocks corrupted amounts; a human line edit recomputes its amount and header total before renewed approval.
+Every mutation changes the relevant version/revision. On `409 VERSION_CONFLICT`, refresh and review the new data. `403 HUMAN_REQUIRED` means the service credential cannot perform this action; `403 REVIEWER_ROLE_REQUIRED` indicates the wrong manager credential. `409 APPROVAL_REQUIRED` and `409 FINANCE_APPROVAL_REQUIRED` prevent final export. `409 PO_AMOUNT_MISMATCH` blocks corrupted amounts. Critical edits clear both approvals.
 
 ## State semantics
 
 - Run `CREATED` → `RUNNING` → `COMPLETED` or `NEEDS_ATTENTION`. These describe the scan, independently of PO approval.
 - Every run contains one result per active SKU, initially BLOCKED with revision 0 / pending reason. Only evaluated results count as processed. After the full check, processed count equals expected count and each result is NO_REORDER, REORDER or BLOCKED.
-- Draft `DRAFT` / `NEEDS_REVIEW` → human `APPROVED` or `REJECTED`. Source/critical changes return it to NEEDS_REVIEW. Rejected drafts can be edited/reviewed again.
+- Draft `DRAFT` / `NEEDS_REVIEW` → Purchasing approval → `APPROVED`, or `FINANCE_REVIEW` for SGD totals >=5,000 → Finance approval → `APPROVED`. Purchasing may reject; Finance may reject drafts awaiting Finance review. Source/critical changes clear both approvals and return to `NEEDS_REVIEW`.
 - Exception OPEN → RESOLVED by an accepted correction, or SUPERSEDED by a later evaluation. History is retained.
 
 Inspect `severity`: WARNING does not block a line, BLOCKING does. Show `decision_reason`, `evidence.timeline`, exception messages, and expected delivery dates to the reviewer. Do not calculate or infer approval state in the frontend.

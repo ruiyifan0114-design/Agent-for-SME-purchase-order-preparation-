@@ -56,14 +56,12 @@ function AuthPage({
   const signup = view === 'signup'
   const [name, setName] = useState('')
   const [email, setEmail] = useState('reviewer@supplydesk.demo')
-  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
   function submit(event: FormEvent) {
     event.preventDefault()
     if (signup && name.trim().length < 2) return setError('Enter your full name.')
     if (!email.includes('@')) return setError('Enter a valid business email.')
-    if (password.length < 6) return setError('Password must contain at least 6 characters.')
     const displayName = signup ? name.trim() : email.split('@')[0].replace(/[._-]/g, ' ')
     onEnter({
       name: displayName.replace(/\b\w/g, (letter) => letter.toUpperCase()),
@@ -111,13 +109,13 @@ function AuthPage({
             <LockKeyhole size={19} />
           </div>
           <span className="auth-overline">
-            {signup ? 'CREATE YOUR WORKSPACE' : 'SECURE WORKSPACE ACCESS'}
+            {signup ? 'PERSONALIZE DEMO PROFILE' : 'LOCAL DEMO ACCESS'}
           </span>
           <h2 id="auth-title">{signup ? 'Start with Supplydesk' : 'Welcome back'}</h2>
           <p>
             {signup
-              ? 'Create your procurement workspace.'
-              : 'Sign in to continue to your review queue.'}
+              ? 'Set the display name for this browser tab.'
+              : 'Choose your display profile to enter the demo workspace.'}
           </p>
           <form onSubmit={submit}>
             {signup && (
@@ -141,30 +139,13 @@ function AuthPage({
                 placeholder="name@company.com"
               />
             </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-              />
-            </label>
-            {!signup && (
-              <div className="auth-options">
-                <label>
-                  <input type="checkbox" /> Remember this device
-                </label>
-                <button type="button">Forgot password?</button>
-              </div>
-            )}
             {error && (
               <p className="auth-error" role="alert">
                 {error}
               </p>
             )}
             <button className="auth-submit" type="submit">
-              {signup ? 'Create account' : 'Sign in'}
+              {signup ? 'Save profile & enter' : 'Continue to workspace'}
               <ArrowRight size={16} />
             </button>
           </form>
@@ -185,13 +166,14 @@ function AuthPage({
             Enter demo workspace
           </button>
           <p className="auth-switch">
-            {signup ? 'Already have an account?' : 'New to Supplydesk?'}{' '}
+            {signup ? 'Use a quick profile?' : 'Personalize your profile?'}{' '}
             <button onClick={() => onView(signup ? 'login' : 'signup')}>
-              {signup ? 'Sign in' : 'Create account'}
+              {signup ? 'Demo access' : 'Edit profile'}
             </button>
           </p>
           <small className="auth-note">
-            Frontend authentication preview. Ready for identity-provider integration.
+            Profile is saved in this tab only. API access and purchasing / finance permissions are
+            enforced by separate backend credentials in Workspace connection.
           </small>
         </section>
       </div>
@@ -220,9 +202,9 @@ export function PublicExperience({ onEnter }: { onEnter: (user: WorkspaceUser) =
           </a>
         </nav>
         <div className="landing-actions">
-          <button onClick={() => setView('login')}>Log in</button>
+          <button onClick={() => setView('login')}>Demo access</button>
           <button className="nav-cta" onClick={() => setView('signup')}>
-            Request access <ArrowRight size={14} />
+            Set up profile <ArrowRight size={14} />
           </button>
         </div>
         <button className="landing-menu" aria-label="Toggle menu" onClick={() => setMenu(!menu)}>

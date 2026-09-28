@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { api, setCredentials } from './api'
 import AgentPanel from './AgentPanel'
+import type { EditableDataset } from './DatasetEditor'
 import { Badge, Button, ErrorNotice, Evidence, Loading, Modal, shortId } from './components'
 import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
 import { PublicExperience, type WorkspaceUser } from './PublicExperience'
@@ -68,21 +69,21 @@ type Dialog =
   | { kind: 'evidence'; result: Check }
   | { kind: 'correction'; result: Check; exception?: ExceptionItem; price?: string }
   | { kind: 'edit'; draft: Draft; line: Line }
-  | { kind: 'review'; draft: Draft; reject: boolean }
+  | { kind: 'review'; draft: Draft; reject: boolean; finance?: boolean }
   | { kind: 'history'; draft: Draft; events: ApprovalEvent[] }
   | { kind: 'connection' }
   | { kind: 'account' }
   | { kind: 'help' }
 function initialCredentials(): Credentials {
+  const defaults = {
+    service: 'local-service-change-me',
+    reviewer: 'local-reviewer-change-me',
+    finance: 'local-finance-change-me',
+  }
   try {
-    return (
-      JSON.parse(sessionStorage.getItem('supplydesk-access') || 'null') || {
-        service: 'local-service-change-me',
-        reviewer: 'local-reviewer-change-me',
-      }
-    )
+    return { ...defaults, ...JSON.parse(sessionStorage.getItem('supplydesk-access') || '{}') }
   } catch {
-    return { service: 'local-service-change-me', reviewer: 'local-reviewer-change-me' }
+    return defaults
   }
 }
 function initialScreen(): Screen {
@@ -305,6 +306,25 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
       openRun(batch)
     })
   }
+  async function createDataset(dataset: EditableDataset, filename: string) {
+    await execute('', async () => {
+      const batch = await api.importJson(dataset, filename)
+      setBatches(await api.batches())
+      if (batch.status === 'REJECTED') {
+        const details = batch.issues
+          .slice(0, 3)
+          .map((issue) => issue.message)
+          .join('; ')
+        throw new Error(`Dataset was saved but validation failed. ${details}`)
+      }
+      notify(
+        batch.issues.length
+          ? 'Manual dataset saved with validation warnings. Review them before running.'
+          : 'Manual dataset validated and saved as a new auditable batch.',
+      )
+      openRun(batch)
+    })
+  }
   async function saveCorrection(context: Context, reason: string) {
     if (dialog?.kind !== 'correction' || !run) return
     const { result, exception } = dialog
@@ -330,14 +350,22 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
   }
   async function review(comment: string) {
     if (dialog?.kind !== 'review') return
-    const { draft, reject } = dialog
+    const { draft, reject, finance } = dialog
     await execute('', async () => {
-      await (reject ? api.reject(draft, comment) : api.approve(draft, comment))
+      await (reject
+        ? api.reject(draft, comment, finance)
+        : finance
+          ? api.financeApprove(draft, comment)
+          : api.approve(draft, comment))
       setDialog(null)
       notify(
         reject
           ? 'Rejection recorded by the backend.'
-          : 'Human approval recorded. This version can now be exported.',
+          : finance
+            ? 'Finance Manager approval recorded. This version can now be exported.'
+            : draft.requires_finance_review
+              ? 'Purchasing Manager approval recorded. Finance Manager review is still required.'
+              : 'Purchasing Manager approval recorded. This version can now be exported.',
       )
       await refreshAfterMutation(draft.run_id)
     })
@@ -370,7 +398,9 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     })
   }
   function agentAction(reply: AgentReply) {
-    if (reply.action === 'RUN') {
+    if (reply.action === 'NAVIGATE' && reply.page) {
+      go(reply.page)
+    } else if (reply.action === 'RUN') {
       openRun()
       setChat(false)
     } else if (reply.action === 'DRAFTS') {
@@ -584,6 +614,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
                   onUpload={upload}
                   onDemo={(s) => void loadDemo(s).catch(() => {})}
                   onRun={(b) => openRun(b)}
+                  onCreate={createDataset}
                 />
               )}
               {screen === 'skus' && (
@@ -608,7 +639,9 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
                   drafts={drafts}
                   busy={busy}
                   onEdit={(draft, line) => setDialog({ kind: 'edit', draft, line })}
-                  onReview={(draft, reject) => setDialog({ kind: 'review', draft, reject })}
+                  onReview={(draft, reject, finance) =>
+                    setDialog({ kind: 'review', draft, reject, finance })
+                  }
                   onExport={(d) => void exportPO(d).catch(() => {})}
                   onEvidence={(id) => {
                     const result = results.find((r) => r.id === id)
@@ -734,6 +767,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
         <ReviewForm
           draft={dialog.draft}
           reject={dialog.reject}
+          finance={dialog.finance}
           onSave={review}
           onClose={closeDialog}
         />
@@ -761,7 +795,11 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
         />
       )}
       {dialog?.kind === 'account' && (
-        <Modal title="Account" subtitle="Workspace identity and access" onClose={closeDialog}>
+        <Modal
+          title="Account"
+          subtitle="Local display profile and workspace connection"
+          onClose={closeDialog}
+        >
           <div className="modal-body account-panel">
             <div className="account-identity">
               <span className="account-avatar">{user.initials}</span>
@@ -772,16 +810,16 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
             </div>
             <dl className="account-details">
               <div>
-                <dt>Role</dt>
+                <dt>Display role</dt>
                 <dd>{user.role}</dd>
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd>Synthetic Office Co.</dd>
+                <dd>Local procurement demo</dd>
               </div>
               <div>
                 <dt>Access</dt>
-                <dd>Reviewer</dd>
+                <dd>Permissions verified by backend API credentials</dd>
               </div>
             </dl>
             <div className="modal-actions account-actions">
@@ -802,7 +840,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
               [
                 '01',
                 'Load and validate',
-                'Upload the six source tables or choose a synthetic demo scenario.',
+                'Build a dataset manually, edit an existing batch, upload source tables or choose a demo.',
               ],
               [
                 '02',
@@ -872,6 +910,8 @@ export default function App() {
   }
   const signOut = () => {
     sessionStorage.removeItem('supplydesk-user')
+    sessionStorage.removeItem('supplydesk-access')
+    sessionStorage.removeItem('supplydesk-run')
     setUser(null)
     setWorkspace(false)
     history.replaceState(null, '', location.pathname)

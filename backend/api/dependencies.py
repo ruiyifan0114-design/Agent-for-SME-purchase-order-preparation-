@@ -8,12 +8,14 @@ from backend.tools.runtime import BusinessError
 
 def principal(x_api_key: str = Header(default="")):
     cfg = settings()
-    if cfg.api_key == cfg.reviewer_api_key:
-        raise BusinessError("Service and reviewer credentials must differ", "CONFIGURATION_ERROR", 503)
+    if len({cfg.api_key, cfg.reviewer_api_key, cfg.finance_api_key}) != 3:
+        raise BusinessError("Service, purchasing and finance credentials must differ", "CONFIGURATION_ERROR", 503)
+    if x_api_key and compare_digest(x_api_key, cfg.finance_api_key):
+        return {"actor": cfg.finance_reviewer_name, "human": True, "role": "finance"}
     if x_api_key and compare_digest(x_api_key, cfg.reviewer_api_key):
-        return {"actor": cfg.reviewer_name, "human": True}
+        return {"actor": cfg.reviewer_name, "human": True, "role": "purchasing"}
     if x_api_key and compare_digest(x_api_key, cfg.api_key):
-        return {"actor": "procurement-service", "human": False}
+        return {"actor": "procurement-service", "human": False, "role": "service"}
     raise BusinessError("Valid X-API-Key required", "UNAUTHORIZED", 401)
 
 

@@ -145,6 +145,10 @@ export interface Draft {
   total: string
   reviewer: string | null
   approved_at: string | null
+  finance_reviewer: string | null
+  finance_approved_at: string | null
+  requires_finance_review: boolean
+  approval_stage: 'PURCHASING' | 'FINANCE' | 'COMPLETE'
   lines: Line[]
 }
 export interface Batch {
@@ -190,7 +194,8 @@ export interface Report {
 }
 export interface AgentReply {
   message: string
-  action: 'NONE' | 'RUN' | 'DRAFTS' | 'PRICE' | 'EXPLAIN' | 'BRIEF' | 'INSIGHTS'
+  action: 'NONE' | 'RUN' | 'DRAFTS' | 'PRICE' | 'EXPLAIN' | 'BRIEF' | 'INSIGHTS' | 'NAVIGATE'
+  page?: 'dashboard' | 'intelligence' | 'data' | 'skus' | 'exceptions' | 'drafts' | 'audit'
   sku_id?: string | null
   unit_price?: string | null
   provider: string
@@ -255,4 +260,5 @@ export interface Simulation {
 export interface Credentials {
   service: string
   reviewer: string
+  finance: string
 }

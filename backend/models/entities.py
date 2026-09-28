@@ -158,6 +158,8 @@ class PODraft(Identity, Base):
     total: Mapped[Decimal] = mapped_column(Numeric(32, 2), default=0)
     reviewer: Mapped[str | None] = mapped_column(String(200))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finance_reviewer: Mapped[str | None] = mapped_column(String(200))
+    finance_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class POLine(Identity, Base):

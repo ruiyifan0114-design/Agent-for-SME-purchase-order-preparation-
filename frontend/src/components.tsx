@@ -13,6 +13,7 @@ const labels: Record<string, string> = {
   RUNNING: 'Checking',
   DRAFT: 'Draft',
   NEEDS_REVIEW: 'Needs review',
+  FINANCE_REVIEW: 'Finance review',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
   VALIDATED: 'Validated',

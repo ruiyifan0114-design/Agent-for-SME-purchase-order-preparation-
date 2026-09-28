@@ -1,6 +1,6 @@
 # Procurement workspace frontend
 
-React + TypeScript + Vite, connected to the real FastAPI backend. The interface includes a public product landing page, frontend-ready login and sign-up flows, account identity, and a compact hover-expand enterprise workspace shell.
+React + TypeScript + Vite, connected to FastAPI. Includes a product landing page, an explicitly local demo profile, and a hover-expand enterprise workspace shell. Profile fields are saved for the current tab; there is no password collection or simulated account authentication.
 
 ## Start
 
@@ -18,7 +18,7 @@ For a single-origin preview, run `npm run build`, then start or restart FastAPI.
 
 ## Credentials
 
-Connection settings accept service and reviewer credentials, stored in sessionStorage for the browser tab. Defaults match `.env.example`; update settings if the backend credentials change. DeepSeek credentials are read only by the backend from `DEEPSEEK_API_KEY` or the ignored root `deepseek_api_key.txt`. Do not put provider credentials in Vite variables.
+Connection settings accept service, Purchasing Manager and Finance Manager credentials, stored in sessionStorage for this tab and cleared on sign-out. Defaults match `.env.example`. DeepSeek credentials are read only by the backend from `DEEPSEEK_API_KEY` or the ignored root `deepseek_api_key.txt`.
 
 ## Demo walkthrough
 
@@ -26,7 +26,7 @@ Connection settings accept service and reviewer credentials, stored in sessionSt
 2. Run the incoming-stock demo. Timely incoming stock prevents an unnecessary purchase; late incoming stock leaves a timing gap visible.
 3. Run the exceptions demo. All 10 SKUs are scanned while 3 decisions remain blocked. Correct missing price, missing inventory and supplier approval through the forms, then review updated drafts. Editing an approved draft requires approval again.
 
-The data page accepts six CSV files, a six-sheet XLSX workbook or JSON. Validation findings and rejected imports remain visible. Interrupted checks resume the existing run. The agent explains saved decisions and opens proposed correction forms; it cannot silently save corrections or approve orders.
+The data page accepts files or manual input through **Build dataset manually**. Add, edit, duplicate and delete records across all six tables. **Edit as new batch** also repairs rejected imports while retaining the original version. Saving and validating opens the review policy form; the resulting run is available to the Agent. SGD drafts of 5,000 or above require Finance Manager approval after Purchasing Manager approval.
 
 ## Verification
 
@@ -38,4 +38,4 @@ npm run test:e2e
 
 Tests require the backend, database and frontend running with default demo credentials. They create synthetic runs and approved drafts; use a development database. Windows uses installed Microsoft Edge. On other platforms install Chromium using `node node_modules/@playwright/test/cli.js install chromium`.
 
-All eleven browser workflows passed against the production build: Decision Cockpit, what-if simulation, grounded Daily Brief, landing/authentication/account structure, approval/export/reapproval/rejection, incoming stock, three blocker corrections, agent suggestions without silent writes, failed approval, CSV validation, mobile layout, scan resumption and rejected JSON intake. Fonts are bundled locally. See [verification](../docs/verification.md) for backend checks and environment limitations.
+See [verification](../docs/verification.md) for current test results and environment limits. The browser suite covers manual entry through dual approval and export, versioned edits, chat history/navigation, cockpit simulation, exception correction, and mobile layout. Fonts are bundled locally.

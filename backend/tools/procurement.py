@@ -16,11 +16,12 @@ from backend.tools.runtime import BusinessError, audited, serial
 
 TABLE_MODELS = {"sku_master": SKU, "supplier_master": Supplier, "supplier_sku": SupplierSKU,
                 "inventory_snapshot": Inventory, "demand": Demand, "open_po": OpenPO}
+FINANCE_APPROVAL_THRESHOLD = Decimal("5000")
 
 
 class ProcurementTools:
-    def __init__(self, db, actor="service", human=False):
-        self.db, self.actor, self.human = db, actor, human
+    def __init__(self, db, actor="service", human=False, role="purchasing"):
+        self.db, self.actor, self.human, self.role = db, actor, human, role
 
     def _get(self, model, identifier, lock=False):
         query = select(model).where(model.id == identifier)
@@ -34,9 +35,11 @@ class ProcurementTools:
     def _rows(self, model, **filters):
         return list(self.db.scalars(select(model).filter_by(**filters).order_by(model.id)))
 
-    def _human(self):
+    def _human(self, role="purchasing"):
         if not self.human or not self.actor.strip():
             raise BusinessError("Explicit authenticated human action required", "HUMAN_REQUIRED", 403)
+        if self.role != role:
+            raise BusinessError(f"This action requires the {role} reviewer role", "REVIEWER_ROLE_REQUIRED", 403)
 
     def _import(self, raw, filename):
         try:
@@ -125,6 +128,7 @@ class ProcurementTools:
     def _invalidate(self, draft, reason):
         draft.status = "NEEDS_REVIEW"
         draft.reviewer, draft.approved_at = None, None
+        draft.finance_reviewer, draft.finance_approved_at = None, None
         draft.version += 1
         self._event(draft, "INVALIDATED", reason)
 
@@ -237,8 +241,16 @@ class ProcurementTools:
         obj["po_number"] = f"PO-{draft.id}"
         obj["tax_treatment"] = "PRE_TAX"
         obj["synthetic"] = True
+        obj["requires_finance_review"] = self._requires_finance(draft)
+        obj["approval_stage"] = (
+            "COMPLETE" if draft.status == "APPROVED" else
+            "FINANCE" if draft.status == "FINANCE_REVIEW" else "PURCHASING"
+        )
         obj["lines"] = serial(self._rows(POLine, draft_id=draft.id))
         return obj
+
+    def _requires_finance(self, draft):
+        return draft.currency == "SGD" and draft.total >= FINANCE_APPROVAL_THRESHOLD
 
     @audited
     def generate_po_drafts(self, run_id):
@@ -426,23 +438,44 @@ class ProcurementTools:
 
     @audited
     def approve_po(self, draft_id, request: Review):
-        self._human()
+        self._human("purchasing")
         draft = self._locked_draft(draft_id)
         self._version(draft, request.expected_version)
-        if draft.status == "APPROVED":
-            raise BusinessError("PO already approved")
+        if draft.status in {"APPROVED", "FINANCE_REVIEW"}:
+            raise BusinessError("Purchasing approval already recorded")
         self._approval_gate(draft)
-        draft.status, draft.reviewer, draft.approved_at = "APPROVED", self.actor, now()
+        draft.reviewer, draft.approved_at = self.actor, now()
+        draft.finance_reviewer, draft.finance_approved_at = None, None
+        draft.status = "FINANCE_REVIEW" if self._requires_finance(draft) else "APPROVED"
         draft.version += 1
-        self._event(draft, "APPROVED", request.comment)
+        self._event(draft, "PURCHASING_APPROVED" if draft.status == "FINANCE_REVIEW" else "APPROVED", request.comment)
+        return self._draft(draft)
+
+    @audited
+    def finance_approve_po(self, draft_id, request: Review):
+        self._human("finance")
+        draft = self._locked_draft(draft_id)
+        self._version(draft, request.expected_version)
+        if not self._requires_finance(draft):
+            raise BusinessError("Finance review is only required for SGD drafts of 5,000 or above")
+        if draft.status != "FINANCE_REVIEW" or not draft.reviewer or not draft.approved_at:
+            raise BusinessError("Purchasing Manager approval is required before Finance review", "PURCHASING_APPROVAL_REQUIRED")
+        self._approval_gate(draft)
+        draft.status = "APPROVED"
+        draft.finance_reviewer, draft.finance_approved_at = self.actor, now()
+        draft.version += 1
+        self._event(draft, "FINANCE_APPROVED", request.comment)
         return self._draft(draft)
 
     @audited
     def reject_po(self, draft_id, request: Review):
-        self._human()
+        self._human(self.role if self.role in {"purchasing", "finance"} else "purchasing")
         draft = self._locked_draft(draft_id)
         self._version(draft, request.expected_version)
+        if self.role == "finance" and draft.status != "FINANCE_REVIEW":
+            raise BusinessError("Finance can reject only drafts awaiting Finance review")
         draft.status, draft.reviewer, draft.approved_at = "REJECTED", None, None
+        draft.finance_reviewer, draft.finance_approved_at = None, None
         draft.version += 1
         self._event(draft, "REJECTED", request.comment)
         return self._draft(draft)
@@ -452,10 +485,13 @@ class ProcurementTools:
         draft = self._locked_draft(draft_id)
         if draft.status != "APPROVED" or not draft.reviewer or not draft.approved_at:
             raise BusinessError("Only explicitly human-approved POs may be exported", "APPROVAL_REQUIRED")
+        if self._requires_finance(draft) and (not draft.finance_reviewer or not draft.finance_approved_at):
+            raise BusinessError("Finance Manager approval is required for SGD drafts of 5,000 or above", "FINANCE_APPROVAL_REQUIRED")
         self._approval_gate(draft)
         output = io.StringIO(newline="")
         columns = ["po_number", "run_id", "supplier_id", "supplier_name", "currency", "warehouse", "order_date",
-                   "reviewer", "approved_at", "sku_id", "description", "uom", "quantity", "unit_price", "amount",
+                   "reviewer", "approved_at", "finance_reviewer", "finance_approved_at",
+                   "sku_id", "description", "uom", "quantity", "unit_price", "amount",
                    "need_date", "expected_delivery_date", "result_id", "result_revision", "total", "tax_treatment", "synthetic"]
         writer = csv.DictWriter(output, fieldnames=columns)
         writer.writeheader()

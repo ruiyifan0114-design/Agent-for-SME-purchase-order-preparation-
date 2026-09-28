@@ -14,6 +14,7 @@ import {
   PackageCheck,
   Pencil,
   Play,
+  Plus,
   Search,
   ShieldCheck,
   SlidersHorizontal,
@@ -22,6 +23,8 @@ import {
   UploadCloud,
 } from 'lucide-react'
 import { api } from './api'
+import DatasetEditor from './DatasetEditor'
+import type { EditableDataset } from './DatasetEditor'
 import {
   Badge,
   Button,
@@ -589,16 +592,22 @@ export function DataScreen({
   onUpload,
   onDemo,
   onRun,
+  onCreate,
 }: {
   batches: Batch[]
   busy: boolean
   onUpload: (files: File[]) => Promise<void>
   onDemo: (s: string) => void
   onRun: (batch: Batch) => void
+  onCreate: (dataset: EditableDataset, filename: string) => Promise<void>
 }) {
   const input = useRef<HTMLInputElement>(null),
     [files, setFiles] = useState<File[]>([]),
-    [drag, setDrag] = useState(false)
+    [drag, setDrag] = useState(false),
+    [editor, setEditor] = useState<{
+      source?: Record<string, Record<string, unknown>[]>
+      sourceName?: string
+    } | null>(null)
   return (
     <>
       <SectionTitle
@@ -648,6 +657,11 @@ export function DataScreen({
         <PanelHead
           title="Upload your dataset"
           note="Six CSV files, one six-sheet Excel workbook, or one dataset JSON."
+          action={
+            <Button kind="secondary" onClick={() => setEditor({})} disabled={busy}>
+              <Plus size={16} /> Build dataset manually
+            </Button>
+          }
         />
         <div
           className={`dropzone ${drag ? 'dragging' : ''}`}
@@ -773,12 +787,21 @@ export function DataScreen({
                       the SKU check.
                     </p>
                   )}
-                  {b.status.startsWith('VALIDATED') && (
-                    <Button kind="secondary" onClick={() => onRun(b)} disabled={busy}>
-                      Run check with this batch
-                      <ArrowRight size={15} />
+                  <div className="batch-actions">
+                    <Button
+                      kind="ghost"
+                      onClick={() => setEditor({ source: b.raw_data, sourceName: b.filename })}
+                      disabled={busy}
+                    >
+                      <Pencil size={15} /> Edit as new batch
                     </Button>
-                  )}
+                    {b.status.startsWith('VALIDATED') && (
+                      <Button kind="secondary" onClick={() => onRun(b)} disabled={busy}>
+                        Run check with this batch
+                        <ArrowRight size={15} />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </details>
             ))}
@@ -787,6 +810,14 @@ export function DataScreen({
           <Empty title="No imports yet">Load a scenario above or upload your source files.</Empty>
         )}
       </section>
+      {editor && (
+        <DatasetEditor
+          source={editor.source}
+          sourceName={editor.sourceName}
+          onClose={() => setEditor(null)}
+          onSave={onCreate}
+        />
+      )}
     </>
   )
 }
@@ -1032,7 +1063,7 @@ export function DraftScreen({
   drafts: Draft[]
   busy: boolean
   onEdit: (d: Draft, l: Line) => void
-  onReview: (d: Draft, reject: boolean) => void
+  onReview: (d: Draft, reject: boolean, finance?: boolean) => void
   onExport: (d: Draft) => void
   onEvidence: (id: string) => void
   onHistory: (d: Draft) => void
@@ -1051,6 +1082,16 @@ export function DraftScreen({
           </Button>
         }
       />
+      <div className="approval-framework-note">
+        <ShieldCheck size={17} />
+        <div>
+          <strong>Human approval framework</strong>
+          <span>
+            Below SGD 5,000: Purchasing Manager. SGD 5,000 or above: Purchasing Manager, then
+            Finance Manager.
+          </span>
+        </div>
+      </div>
       {!drafts.length && (
         <section className="panel">
           <Empty title="No eligible drafts yet">
@@ -1084,6 +1125,12 @@ export function DraftScreen({
               <div className="draft-notice">
                 Review required. The current quantity, price or source version must be explicitly
                 approved. Any earlier approval does not apply.
+              </div>
+            )}
+            {d.status === 'FINANCE_REVIEW' && (
+              <div className="draft-notice finance">
+                Purchasing Manager approval is recorded. Finance Manager review is required before
+                export because this SGD draft is 5,000 or above.
               </div>
             )}
             <div className="table-scroll">
@@ -1149,9 +1196,21 @@ export function DraftScreen({
                   <>
                     <span className="approved-by">
                       <ShieldCheck size={15} />
-                      Approved by {d.reviewer}
+                      Purchasing approved by {d.reviewer}
                     </span>
                     <small>{dateTime(d.approved_at)}</small>
+                    {d.finance_approved_at ? (
+                      <>
+                        <span className="approved-by finance-approved">
+                          <ShieldCheck size={15} /> Finance approved by {d.finance_reviewer}
+                        </span>
+                        <small>{dateTime(d.finance_approved_at)}</small>
+                      </>
+                    ) : d.requires_finance_review ? (
+                      <span className="muted">
+                        <Clock3 size={15} /> Awaiting Finance Manager
+                      </span>
+                    ) : null}
                   </>
                 ) : (
                   <span className="muted">
@@ -1169,6 +1228,22 @@ export function DraftScreen({
                     <ArrowDownToLine size={16} />
                     Export approved PO
                   </Button>
+                ) : d.status === 'FINANCE_REVIEW' ? (
+                  <>
+                    <Button
+                      kind="secondary"
+                      disabled={busy}
+                      onClick={() => onReview(d, true, true)}
+                    >
+                      Finance reject
+                    </Button>
+                    <Button
+                      disabled={busy || !d.lines.length}
+                      onClick={() => onReview(d, false, true)}
+                    >
+                      <ShieldCheck size={16} /> Finance review & approve
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <Button

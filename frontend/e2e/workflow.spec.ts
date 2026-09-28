@@ -24,7 +24,7 @@ async function approve(page: Page, supplier: string) {
     .locator('.draft-card')
     .filter({ has: page.getByRole('heading', { name: supplier, exact: true }) })
   await card.getByRole('button', { name: 'Review & approve' }).click()
-  const modal = page.getByRole('dialog', { name: 'Approve this purchase order?' })
+  const modal = page.getByRole('dialog', { name: 'Purchasing Manager approval' })
   await expect(modal.getByRole('button', { name: 'Confirm approval' })).toBeDisabled()
   await modal
     .getByLabel('Review comment')
@@ -36,17 +36,17 @@ async function approve(page: Page, supplier: string) {
   return card
 }
 
-test('landing, authentication and account shell are ready for backend identity integration', async ({
+test('landing and local profile have functional controls without fake authentication', async ({
   page,
 }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
   await expect(page.getByText('PROCUREMENT INTELLIGENCE, WITH CONTROL')).toBeVisible()
   await page.screenshot({ path: 'test-results/landing-desktop.png', fullPage: true })
-  await page.getByRole('button', { name: 'Log in' }).click()
+  await page.getByRole('button', { name: 'Demo access', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
-  await page.getByLabel('Password').fill('reviewer-demo')
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByLabel('Password')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Continue to workspace', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
   await page.getByRole('button', { name: 'Open account' }).click()
   const account = page.getByRole('dialog', { name: 'Account' })
@@ -54,7 +54,7 @@ test('landing, authentication and account shell are ready for backend identity i
   await expect(account).toContainText('Procurement Manager')
   await account.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Request access' }).click()
+  await page.getByRole('button', { name: 'Set up profile' }).click()
   await expect(page.getByRole('heading', { name: 'Start with Supplydesk' })).toBeVisible()
 })
 
@@ -63,7 +63,9 @@ test('decision cockpit compares reviews, simulates policy and grounds the daily 
 }) => {
   await start(page, '03')
   await nav(page, 'Decision cockpit')
-  await expect(page.getByRole('heading', { name: 'See the exposure. Test the policy.' })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'See the exposure. Test the policy.' }),
+  ).toBeVisible()
   await expect(page.getByText('Recommended value', { exact: true }).first()).toBeVisible()
   await page.getByLabel('Simulation demand percent').fill('150')
   await page.getByRole('button', { name: 'Run scenario' }).click()

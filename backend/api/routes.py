@@ -141,6 +141,11 @@ def reject(draft_id: str, request: Review, t=Depends(tools)):
     return ok(Approval(t).execute(draft_id, request, approve=False))
 
 
+@router.post("/drafts/{draft_id}/finance-approve", response_model=Envelope)
+def finance_approve(draft_id: str, request: Review, t=Depends(tools)):
+    return ok(t.finance_approve_po(draft_id, request))
+
+
 @router.get("/drafts/{draft_id}/export")
 def export(draft_id: str, t=Depends(tools)):
     result = t.export_po(draft_id)

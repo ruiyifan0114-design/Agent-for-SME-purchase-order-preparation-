@@ -27,8 +27,18 @@ function MessageBody({ text }: { text: string }) {
         const numbered = line.match(/^(\d+)\.\s+(.+)/)
         if (!line.trim()) return <span className="chat-line-break" key={index} />
         if (heading) return <h4 key={index}>{inlineMarkup(heading[1])}</h4>
-        if (bullet) return <div className="chat-list-item" key={index}>• {inlineMarkup(bullet[1])}</div>
-        if (numbered) return <div className="chat-list-item" key={index}>{numbered[1]}. {inlineMarkup(numbered[2])}</div>
+        if (bullet)
+          return (
+            <div className="chat-list-item" key={index}>
+              • {inlineMarkup(bullet[1])}
+            </div>
+          )
+        if (numbered)
+          return (
+            <div className="chat-list-item" key={index}>
+              {numbered[1]}. {inlineMarkup(numbered[2])}
+            </div>
+          )
         return <p key={index}>{inlineMarkup(line)}</p>
       })}
     </div>
@@ -67,7 +77,7 @@ export default function AgentPanel({
       .filter((message, index) => index > 0 && message.role !== 'error')
       .map((message): ChatTurn => ({
         role: message.role === 'agent' ? 'assistant' : 'user',
-        content: message.text,
+        content: message.text.slice(0, 4000),
       }))
       .slice(-10)
     setInput('')
@@ -108,10 +118,11 @@ export default function AgentPanel({
         </span>
         <div>
           <strong>Procurement agent</strong>
-          <small><span className="agent-live-dot" /> DeepSeek · live workspace tools</small>
+          <small>DeepSeek · workspace evidence</small>
         </div>
         <button
           className="icon-button"
+          disabled={busy}
           onClick={() => {
             setMessages([welcome])
             setSku(undefined)

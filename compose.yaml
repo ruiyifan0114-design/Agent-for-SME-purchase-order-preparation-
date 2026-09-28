@@ -21,6 +21,10 @@ services:
       API_KEY: ${API_KEY:-local-service-change-me}
       REVIEWER_API_KEY: ${REVIEWER_API_KEY:-local-reviewer-change-me}
       REVIEWER_NAME: ${REVIEWER_NAME:-Demo Human Reviewer}
+      FINANCE_API_KEY: ${FINANCE_API_KEY:-local-finance-change-me}
+      FINANCE_REVIEWER_NAME: ${FINANCE_REVIEWER_NAME:-Demo Finance Manager}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

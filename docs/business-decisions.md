@@ -23,8 +23,8 @@ Authority: the user's backend prompt plus the existing `biz module` CSVs, all 14
 | Q-02/03 SKU/supplier identities | Reuse the ten template examples and SUP-A/B/C; synthetic labels retained in docs/output. |
 | Q-04/05/06 Prices, MOQ, pack, lead time | Explicit synthetic fixture values; placeholders normalized to missing. Missing modifiers block; use MOQ=0/pack=1 to explicitly state no restriction. |
 | Q-07 Staleness | Both thresholds required in run request. Demo 1/30 days is a synthetic test choice, not confirmed business policy. Applies to inventory and commercial update dates; future dates also block. |
-| Q-08 Reviewer | Server-configured generic reviewer, separate credential, no assumed business role. |
-| Q-09 Approval amount threshold | None added. Every final PO requires human approval. |
+| Q-08 Reviewer | Separate server-configured Purchasing Manager and Finance Manager credentials; frontend profile is display-only. |
+| Q-09 Approval amount threshold | User-supplied competition rule: SGD <5,000 requires Purchasing Manager; SGD >=5,000 additionally requires Finance Manager. No currency conversion is inferred. |
 | Q-10 Tax | Excluded; PO/export explicitly PRE_TAX. Two-decimal money is the MVP currency precision policy. |
 | Q-11 Payment/shipping terms | Out of scope; one explicit warehouse destination. |
 | Q-12 Numbering | Unique `PO-<UUID>`, no external numbering convention assumed. |
@@ -43,4 +43,4 @@ PO_AMOUNT_MISMATCH is an approval/export guard error and a FAILED tool log, not 
 
 ## Deliberate MVP limits
 
-One deterministic workflow Agent; no chat model, real ERP, vendor messages, multi-supplier optimization, tax engine, scheduling daemon or multi-user identity provider. Daily reviews are explicit API/CLI calls. Raw imports are immutable; human corrections are run-local evidence. Independent daily runs must receive refreshed inputs, including newly placed open POs, to avoid reordering across separate reviews. A technical database outage fails visibly; it does not get converted into a fabricated SKU result.
+One deterministic review workflow and a DeepSeek read-only chat agent; no real ERP, vendor messages, multi-supplier optimization, tax engine, scheduling daemon or multi-user identity provider. Daily reviews are explicit API/CLI calls. Browser data edits create new immutable import batches; human corrections are run-local evidence. Independent daily runs must receive refreshed inputs, including newly placed open POs, to avoid reordering across separate reviews. A database outage fails visibly; it does not become a fabricated SKU result.

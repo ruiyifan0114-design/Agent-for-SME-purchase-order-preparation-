@@ -4,11 +4,13 @@ Supplydesk is an auditable procurement-preparation agent designed for small and 
 
 The project targets one of the most time-consuming and error-prone parts of daily procurement preparation: manually combining spreadsheets, overlooking early stockouts, using outdated prices, selecting unapproved suppliers, and being unable to explain how order quantities were calculated. Supplydesk lets the Agent handle data organization, calculations, and tracking, while procurement staff remain responsible for exception handling and final purchasing commitments.
 
-> The current version is a single-warehouse, single-currency, single-reviewer MVP. All companies, products, amounts, and orders in the repository are synthetic demo data. The system does not connect to a real ERP, contact suppliers, or automatically issue purchase orders.
+> The current version is a single-warehouse, single-currency-per-review MVP with Purchasing Manager and Finance Manager approval stages. Repository demo data is synthetic. The system does not connect to a real ERP, contact suppliers, or automatically issue purchase orders.
 
 ## Core Features
 
 ### 1. Multi-Source Procurement Data Import and Validation
+
+Use **Data intake → Build dataset manually** to add goods, suppliers, commercial terms, inventory, demand and incoming orders directly in the browser. Records can be edited, duplicated or deleted. **Validate & create batch** saves the data and opens review-policy confirmation. **Edit as new batch** revises an earlier import while preserving its original evidence and approvals. The Agent reads the selected run created from this batch.
 
 The system supports six CSV files, an Excel workbook with six worksheets, or JSON data covering:
 
@@ -71,6 +73,7 @@ The approval process has clear safety boundaries:
 - Version checks are used during approval to prevent an outdated page from approving a draft that has already changed.
 - If there are critical changes to quantities, prices, supplier sources, or calculation results, any existing approval is automatically invalidated and the draft returns to `NEEDS_REVIEW`.
 - Only drafts with `APPROVED` status can be exported.
+- For SGD drafts below 5,000, Purchasing Manager approval completes review. For SGD drafts of 5,000 or above, the draft enters `FINANCE_REVIEW`; Finance Manager approval is required before export. Critical changes invalidate both approvals. This threshold is a competition prototype rule, not a universal ERP standard.
 
 ### 6. Agent Explanations and Complete Audit Trail
 
@@ -196,9 +199,10 @@ All `/api/v1` endpoints require an `X-API-Key`:
 | Identity | Environment Variable | Permissions |
 | --- | --- | --- |
 | Service / Agent | `API_KEY` | Import, run checks, generate drafts, query data, and export approved drafts. |
-| Human Reviewer | `REVIEWER_API_KEY` | Service permissions + source corrections, draft editing, approval, and rejection. |
+| Purchasing Manager | `REVIEWER_API_KEY` | Service permissions + source corrections, draft editing, purchasing approval, and rejection. |
+| Finance Manager | `FINANCE_API_KEY` | Service permissions + final finance approval or rejection of drafts awaiting finance review. |
 
-The two keys must be different. Demo default values are provided in `.env.example`; they must be replaced before external deployment, and HTTPS must be enabled. The DeepSeek API key is read only by the backend and can be configured through `DEEPSEEK_API_KEY` or a Git-ignored `deepseek_api_key.txt` file. It must never be exposed in frontend environment variables or committed to the repository.
+The three keys must be different. Demo defaults are provided in `.env.example`; replace them before external deployment and enable HTTPS. The browser profile is display-only and does not grant backend permissions. DeepSeek reads `DEEPSEEK_API_KEY` or the Git-ignored `deepseek_api_key.txt` on the backend only. With Docker Compose, supply `DEEPSEEK_API_KEY` through the environment. After updating an existing installation, run `uv run alembic upgrade head` before restarting the server.
 
 ## Testing and Current Status
 
@@ -213,8 +217,8 @@ npm run test:e2e
 
 The current version has passed:
 
-- 75 backend and integration tests, with 1 additional environment-dependent test skipped
-- 11 browser end-to-end workflows covering the cockpit, read-only simulation, Daily Brief, authentication UI, account structure, and real procurement APIs
+- Backend and integration tests, including SGD threshold boundaries, role separation, export gates and invalidation of both approvals
+- 13 browser workflows including manual entry, editing, duplication/deletion, two-stage approval, export, chat navigation, and mobile layout
 - TypeScript checks and Vite production build
 - Alembic upgrade, downgrade, re-upgrade, and schema drift checks
 - Visual checks at 1440px desktop and 390px mobile widths

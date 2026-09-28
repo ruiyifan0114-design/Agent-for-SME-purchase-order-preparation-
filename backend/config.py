@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     api_key: str = "local-service-change-me"
     reviewer_api_key: str = "local-reviewer-change-me"
     reviewer_name: str = "Demo Human Reviewer"
+    finance_api_key: str = "local-finance-change-me"
+    finance_reviewer_name: str = "Demo Finance Manager"
     deepseek_api_key: str = ""
     deepseek_key_file: str = "deepseek_api_key.txt"
     deepseek_model: str = "deepseek-flash"

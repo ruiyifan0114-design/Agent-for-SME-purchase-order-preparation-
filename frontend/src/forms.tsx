@@ -501,11 +501,13 @@ export function EditLineForm({
 export function ReviewForm({
   draft,
   reject,
+  finance = false,
   onSave,
   onClose,
 }: {
   draft: Draft
   reject: boolean
+  finance?: boolean
   onSave: (comment: string) => Promise<void>
   onClose: () => void
 }) {
@@ -514,7 +516,13 @@ export function ReviewForm({
   const state = useSubmit(() => onSave(comment))
   return (
     <Modal
-      title={reject ? 'Reject this purchase order?' : 'Approve this purchase order?'}
+      title={
+        reject
+          ? 'Reject this purchase order?'
+          : finance
+            ? 'Finance Manager review'
+            : 'Purchasing Manager approval'
+      }
       subtitle={`${draft.supplier_name} · PO-${shortId(draft.id)}`}
       onClose={state.busy ? () => {} : onClose}
     >
@@ -544,7 +552,9 @@ export function ReviewForm({
           <span>
             {reject
               ? 'I confirm that this draft should be rejected.'
-              : 'I have reviewed the source evidence, quantities, prices and timing warnings. I explicitly approve this version.'}
+              : finance
+                ? 'I have reviewed this SGD 5,000+ draft after Purchasing Manager approval and explicitly approve this version as Finance Manager.'
+                : 'I have reviewed the source evidence, quantities, prices and timing warnings. I explicitly approve this version as Purchasing Manager.'}
           </span>
         </label>
         {state.error && <ErrorNotice message={state.error} />}
@@ -604,6 +614,15 @@ export function ConnectionForm({
             autoComplete="off"
             value={form.reviewer}
             onChange={(e) => setForm({ ...form, reviewer: e.target.value })}
+          />
+        </Field>
+        <Field label="Finance Manager access key">
+          <input
+            required
+            type="password"
+            autoComplete="off"
+            value={form.finance}
+            onChange={(e) => setForm({ ...form, finance: e.target.value })}
           />
         </Field>
         <p className="muted">

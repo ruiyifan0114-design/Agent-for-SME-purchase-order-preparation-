@@ -571,6 +571,41 @@ label {
 .draft-card {
   border-top-color: #a88343;
 }
+.approval-framework-note {
+  display: flex;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border: 1px solid #dfd2b9;
+  border-radius: 9px;
+  color: #705a30;
+  background: #fcf9f1;
+}
+.approval-framework-note div {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.draft-notice.finance {
+  color: #735c27;
+  background: #fcf8ed;
+}
+.finance-approved {
+  margin-top: 7px;
+}
+.badge-finance_review {
+  background: #fcf8ed;
+  color: #735c27;
+}
+.dataset-tabs button.active {
+  background: var(--navy-800);
+  border-color: var(--navy-800);
+}
+.dataset-grid input,
+.dataset-grid select {
+  color: #22364b;
+  border-color: #d7dee5;
+}
 .audit-dot {
   border-color: #6f8eaa;
   box-shadow: 0 0 0 4px #eff3f7;
