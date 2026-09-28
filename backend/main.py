@@ -15,7 +15,8 @@ from backend.tools.runtime import BusinessError
 app = FastAPI(title="Synthetic SME Procurement Agent", version="0.1.0",
               description="Deterministic procurement with explicit human review. All data is synthetic.")
 app.add_middleware(CORSMiddleware, allow_origins=settings().cors_origins,
-                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-API-Key"])
+                   allow_methods=["GET", "POST", "PATCH", "DELETE"],
+                   allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID"])
 app.include_router(router)
 
 

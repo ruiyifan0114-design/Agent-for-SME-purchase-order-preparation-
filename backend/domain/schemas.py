@@ -14,6 +14,33 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class WorkspaceCreate(StrictModel):
+    organization_name: str = Field(min_length=2, max_length=200)
+    name: str = Field(min_length=2, max_length=200)
+    business_entity: str = Field(min_length=2, max_length=200)
+    warehouse: str = Field(min_length=1, max_length=100)
+    currency: str = Field(default="SGD", pattern=r"^[A-Z]{3}$")
+    finance_threshold: Decimal = Field(default=Decimal("5000"), ge=0, max_digits=18, decimal_places=2)
+
+
+class WorkspaceUpdate(StrictModel):
+    name: str = Field(min_length=2, max_length=200)
+    business_entity: str = Field(min_length=2, max_length=200)
+    warehouse: str = Field(min_length=1, max_length=100)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    finance_threshold: Decimal = Field(ge=0, max_digits=18, decimal_places=2)
+
+
+class MemberInvite(StrictModel):
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    display_name: str = Field(min_length=2, max_length=200)
+    role: str = Field(pattern=r"^(procurement|purchasing|finance|viewer)$")
+
+
+class MemberUpdate(StrictModel):
+    role: str = Field(pattern=r"^(procurement|purchasing|finance|viewer)$")
+
+
 class SKURow(StrictModel):
     sku_id: Code
     description: Annotated[str, Field(min_length=1, max_length=500)]

@@ -15,12 +15,20 @@ import type {
   RunRequest,
   Simulation,
   SimulationInput,
+  Workspace,
+  WorkspaceMember,
 } from './types'
 
 let credentials: Credentials = { service: '', reviewer: '', finance: '' }
+let accessToken = ''
+let workspaceId = ''
 const backendOrigin = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
 export function setCredentials(value: Credentials) {
   credentials = value
+}
+export function setAuthContext(token: string, selectedWorkspace = '') {
+  accessToken = token
+  workspaceId = selectedWorkspace
 }
 export class ApiError extends Error {
   constructor(
@@ -45,10 +53,13 @@ async function request<T>(
     )
   }
   const headers = new Headers(options.headers)
-  headers.set(
-    'X-API-Key',
-    human === 'finance' ? credentials.finance : human ? credentials.reviewer : credentials.service,
-  )
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  else
+    headers.set(
+      'X-API-Key',
+      human === 'finance' ? credentials.finance : human ? credentials.reviewer : credentials.service,
+    )
+  if (workspaceId) headers.set('X-Workspace-ID', workspaceId)
   if (options.body && !(options.body instanceof FormData))
     headers.set('Content-Type', 'application/json')
   let response: Response
@@ -87,6 +98,38 @@ const post = <T>(path: string, body?: unknown, human: boolean | 'finance' = fals
     human,
   )
 export const api = {
+  workspaces: () => request<Workspace[]>('/workspaces'),
+  createWorkspace: (input: {
+    organization_name: string
+    name: string
+    business_entity: string
+    warehouse: string
+    currency: string
+    finance_threshold: string
+  }) => post<Workspace>('/workspaces', input),
+  updateWorkspace: (workspace: Workspace) =>
+    request<Workspace>(`/workspaces/${workspace.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: workspace.name,
+        business_entity: workspace.business_entity,
+        warehouse: workspace.warehouse,
+        currency: workspace.currency,
+        finance_threshold: workspace.finance_threshold,
+      }),
+    }),
+  members: (id: string) => request<WorkspaceMember[]>(`/workspaces/${id}/members`),
+  inviteMember: (id: string, input: { email: string; display_name: string; role: string }) =>
+    post<WorkspaceMember>(`/workspaces/${id}/members`, input),
+  updateMember: (workspace: string, member: string, role: string) =>
+    request<WorkspaceMember>(`/workspaces/${workspace}/members/${member}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  removeMember: (workspace: string, member: string) =>
+    request<{ id: string; removed: boolean }>(`/workspaces/${workspace}/members/${member}`, {
+      method: 'DELETE',
+    }),
   runs: () => request<Run[]>('/runs?limit=100'),
   batches: () => request<Batch[]>('/imports?limit=100'),
   run: (id: string) => request<Run>(`/runs/${id}`),

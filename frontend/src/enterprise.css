@@ -127,6 +127,40 @@ textarea:focus {
   background: #101f33;
   border-radius: 8px;
   padding: 11px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workspace-manager { display: grid; gap: 24px; }
+.workspace-list { display: grid; gap: 8px; }
+.workspace-list > button {
+  display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px;
+  width: 100%; padding: 12px; text-align: left; color: #24364b;
+  border: 1px solid #dbe2e9; border-radius: 8px; background: #fff;
+}
+.workspace-list > button.active { border-color: #b4914c; background: #fbf8f1; }
+.workspace-list > button > span:first-child {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: 7px; color: #b4914c; background: #f4efe5;
+}
+.workspace-list strong, .workspace-list small, .member-row strong, .member-row small { display: block; }
+.workspace-list small, .member-row small { margin-top: 3px; color: #718096; }
+.workspace-list .new-workspace { display: flex; justify-content: center; color: #365f84; }
+.workspace-form, .member-manager { display: grid; gap: 14px; padding-top: 20px; border-top: 1px solid #e4e8ed; }
+.workspace-form h3, .member-manager h3 { margin: 0; display: flex; align-items: center; gap: 8px; }
+.workspace-form label { display: grid; gap: 6px; color: #526174; font-size: 12px; font-weight: 600; }
+.workspace-form input, .member-invite input, .member-invite select, .member-row select {
+  min-height: 40px; border: 1px solid #d5dce4; border-radius: 7px; background: #fff; padding: 0 10px;
+}
+.member-row { display: grid; grid-template-columns: 1fr minmax(145px, auto) 34px; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid #edf0f3; }
+.member-row > b { color: #8e6930; }
+.member-row > button { width: 34px; height: 34px; display: grid; place-items: center; color: #9f3a38; border-radius: 6px; }
+.member-invite { display: grid; grid-template-columns: 1fr 1.4fr 1fr auto; gap: 8px; margin-top: 8px; }
+.app-loading { min-height: 100vh; display: grid; place-items: center; background: #f4f6f8; }
+@media (max-width: 760px) {
+  .member-invite { grid-template-columns: 1fr; }
+  .member-row { grid-template-columns: 1fr auto 34px; }
 }
 .workspace-avatar {
   min-width: 30px;

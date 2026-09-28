@@ -12,6 +12,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
+import { cloudAuthEnabled, supabase } from './auth'
 
 export interface WorkspaceUser {
   name: string
@@ -56,13 +57,38 @@ function AuthPage({
   const signup = view === 'signup'
   const [name, setName] = useState('')
   const [email, setEmail] = useState('reviewer@supplydesk.demo')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault()
     if (signup && name.trim().length < 2) return setError('Enter your full name.')
     if (!email.includes('@')) return setError('Enter a valid business email.')
+    if (cloudAuthEnabled && password.length < 8) return setError('Use at least 8 characters.')
     const displayName = signup ? name.trim() : email.split('@')[0].replace(/[._-]/g, ' ')
+    if (cloudAuthEnabled && supabase) {
+      setBusy(true)
+      setError('')
+      setNotice('')
+      const result = signup
+          ? await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: { full_name: displayName },
+              emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+            },
+          })
+        : await supabase.auth.signInWithPassword({ email, password })
+      setBusy(false)
+      if (result.error) return setError(result.error.message)
+      if (!result.data.session) {
+        setNotice('Check your email to confirm the account, then sign in.')
+        return
+      }
+    }
     onEnter({
       name: displayName.replace(/\b\w/g, (letter) => letter.toUpperCase()),
       email,
@@ -139,32 +165,42 @@ function AuthPage({
                 placeholder="name@company.com"
               />
             </label>
+            {cloudAuthEnabled && (
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete={signup ? 'new-password' : 'current-password'}
+                />
+              </label>
+            )}
             {error && (
               <p className="auth-error" role="alert">
                 {error}
               </p>
             )}
-            <button className="auth-submit" type="submit">
-              {signup ? 'Save profile & enter' : 'Continue to workspace'}
+            {notice && <p className="notice soft">{notice}</p>}
+            <button className="auth-submit" type="submit" disabled={busy}>
+              {busy
+                ? 'Please wait…'
+                : signup
+                  ? cloudAuthEnabled ? 'Create account' : 'Save profile'
+                  : cloudAuthEnabled ? 'Sign in' : 'Continue to workspace'}
               <ArrowRight size={16} />
             </button>
           </form>
-          <div className="auth-divider">
-            <span>Demo access</span>
-          </div>
-          <button
-            className="demo-access"
-            onClick={() =>
-              onEnter({
-                name: 'Procurement Reviewer',
-                email: 'reviewer@supplydesk.demo',
-                role: 'Procurement Manager',
-                initials: 'PR',
-              })
-            }
-          >
-            Enter demo workspace
-          </button>
+          {!cloudAuthEnabled && (
+            <>
+              <div className="auth-divider"><span>Demo access</span></div>
+              <button className="demo-access" onClick={() => onEnter({
+                name: 'Procurement Reviewer', email: 'reviewer@supplydesk.demo',
+                role: 'Procurement Manager', initials: 'PR',
+              })}>Enter demo workspace</button>
+            </>
+          )}
           <p className="auth-switch">
             {signup ? 'Use a quick profile?' : 'Personalize your profile?'}{' '}
             <button onClick={() => onView(signup ? 'login' : 'signup')}>
@@ -172,8 +208,9 @@ function AuthPage({
             </button>
           </p>
           <small className="auth-note">
-            Profile is saved in this tab only. API access and purchasing / finance permissions are
-            enforced by separate backend credentials in Workspace connection.
+            {cloudAuthEnabled
+              ? 'Your account session is managed by Supabase. Workspace membership controls data and approval access.'
+              : 'Local demo profile. API permissions use the workspace connection settings.'}
           </small>
         </section>
       </div>
@@ -202,9 +239,9 @@ export function PublicExperience({ onEnter }: { onEnter: (user: WorkspaceUser) =
           </a>
         </nav>
         <div className="landing-actions">
-          <button onClick={() => setView('login')}>Demo access</button>
+          <button onClick={() => setView('login')}>{cloudAuthEnabled ? 'Sign in' : 'Demo access'}</button>
           <button className="nav-cta" onClick={() => setView('signup')}>
-            Set up profile <ArrowRight size={14} />
+            {cloudAuthEnabled ? 'Create account' : 'Set up profile'} <ArrowRight size={14} />
           </button>
         </div>
         <button className="landing-menu" aria-label="Toggle menu" onClick={() => setMenu(!menu)}>
@@ -230,14 +267,10 @@ export function PublicExperience({ onEnter }: { onEnter: (user: WorkspaceUser) =
             <div className="hero-actions">
               <button
                 className="hero-primary"
-                onClick={() =>
-                  onEnter({
-                    name: 'Procurement Reviewer',
-                    email: 'reviewer@supplydesk.demo',
-                    role: 'Procurement Manager',
-                    initials: 'PR',
-                  })
-                }
+                onClick={() => cloudAuthEnabled ? setView('login') : onEnter({
+                  name: 'Procurement Reviewer', email: 'reviewer@supplydesk.demo',
+                  role: 'Procurement Manager', initials: 'PR',
+                })}
               >
                 Enter dashboard <ArrowRight size={16} />
               </button>

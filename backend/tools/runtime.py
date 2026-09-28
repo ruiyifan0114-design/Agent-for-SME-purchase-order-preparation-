@@ -52,13 +52,13 @@ def audited(fn):
                 logged_output = {"count": len(output), "ids": [r["id"] for r in output]}
             elif fn.__name__ in {"import_dataset", "import_files"}:
                 logged_output = {k: output[k] for k in ("id", "status", "source_hash")}
-            self.db.add(ToolExecutionLog(tool_name=fn.__name__, actor=self.actor, status="SUCCESS",
+            self.db.add(ToolExecutionLog(workspace_id=self.workspace_id, tool_name=fn.__name__, actor=self.actor, status="SUCCESS",
                                         input=inputs, output=logged_output))
             self.db.commit()
             return output
         except Exception as exc:
             self.db.rollback()
-            self.db.add(ToolExecutionLog(tool_name=fn.__name__, actor=self.actor, status="FAILED",
+            self.db.add(ToolExecutionLog(workspace_id=self.workspace_id, tool_name=fn.__name__, actor=self.actor, status="FAILED",
                 input=inputs, output=None, error=f"{type(exc).__name__}: {str(exc)[:4000]}"))
             self.db.commit()
             if not isinstance(exc, BusinessError):

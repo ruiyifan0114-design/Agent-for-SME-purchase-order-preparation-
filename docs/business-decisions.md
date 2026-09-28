@@ -24,7 +24,7 @@ Authority: the user's backend prompt plus the existing `biz module` CSVs, all 14
 | Q-04/05/06 Prices, MOQ, pack, lead time | Explicit synthetic fixture values; placeholders normalized to missing. Missing modifiers block; use MOQ=0/pack=1 to explicitly state no restriction. |
 | Q-07 Staleness | Both thresholds required in run request. Demo 1/30 days is a synthetic test choice, not confirmed business policy. Applies to inventory and commercial update dates; future dates also block. |
 | Q-08 Reviewer | Separate server-configured Purchasing Manager and Finance Manager credentials; frontend profile is display-only. |
-| Q-09 Approval amount threshold | User-supplied competition rule: SGD <5,000 requires Purchasing Manager; SGD >=5,000 additionally requires Finance Manager. No currency conversion is inferred. |
+| Q-09 Approval amount threshold | Workspace-owned policy. The competition workspace starts with SGD <5,000 requiring Purchasing Manager and SGD >=5,000 additionally requiring Finance Manager. Owners may configure currency and threshold; no currency conversion is inferred. |
 | Q-10 Tax | Excluded; PO/export explicitly PRE_TAX. Two-decimal money is the MVP currency precision policy. |
 | Q-11 Payment/shipping terms | Out of scope; one explicit warehouse destination. |
 | Q-12 Numbering | Unique `PO-<UUID>`, no external numbering convention assumed. |

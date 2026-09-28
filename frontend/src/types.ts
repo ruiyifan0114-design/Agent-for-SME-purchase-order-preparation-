@@ -262,3 +262,25 @@ export interface Credentials {
   reviewer: string
   finance: string
 }
+
+export type WorkspaceRole = 'owner' | 'procurement' | 'purchasing' | 'finance' | 'viewer'
+export interface Workspace {
+  id: string
+  organization_id: string
+  organization_name: string
+  name: string
+  business_entity: string
+  warehouse: string
+  currency: string
+  finance_threshold: string
+  role: WorkspaceRole | 'service'
+}
+export interface WorkspaceMember {
+  id: string
+  workspace_id: string
+  user_id: string | null
+  email: string
+  display_name: string
+  role: WorkspaceRole
+  created_at: string
+}

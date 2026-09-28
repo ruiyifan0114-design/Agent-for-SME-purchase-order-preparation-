@@ -5,6 +5,9 @@ from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTim
 from sqlalchemy.orm import Mapped, mapped_column
 from backend.db.session import Base
 
+LEGACY_ORGANIZATION_ID = "00000000-0000-0000-0000-000000000001"
+LEGACY_WORKSPACE_ID = "00000000-0000-0000-0000-000000000002"
+
 
 def uid():
     return str(uuid4())
@@ -18,8 +21,43 @@ class Identity:
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
 
 
+class Organization(Identity, Base):
+    __tablename__ = "organization"
+    name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Workspace(Identity, Base):
+    __tablename__ = "workspace"
+    org_id: Mapped[str] = mapped_column(ForeignKey("organization.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    business_entity: Mapped[str] = mapped_column(String(200))
+    warehouse: Mapped[str] = mapped_column(String(100))
+    currency: Mapped[str] = mapped_column(String(3), default="SGD")
+    finance_threshold: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("5000"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class WorkspaceMembership(Identity, Base):
+    __tablename__ = "workspace_membership"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "email"),
+        UniqueConstraint("workspace_id", "user_id"),
+        CheckConstraint("role IN ('owner','procurement','purchasing','finance','viewer')"),
+    )
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    display_name: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class ImportBatch(Identity, Base):
     __tablename__ = "import_batch"
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspace.id"), index=True, default=LEGACY_WORKSPACE_ID
+    )
     filename: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))
     synthetic: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -191,6 +229,9 @@ class ApprovalEvent(Identity, Base):
 
 class ToolExecutionLog(Identity, Base):
     __tablename__ = "tool_execution_log"
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspace.id"), index=True, default=LEGACY_WORKSPACE_ID
+    )
     tool_name: Mapped[str] = mapped_column(String(100), index=True)
     actor: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20))

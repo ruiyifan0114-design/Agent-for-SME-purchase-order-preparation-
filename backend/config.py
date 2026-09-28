@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     deepseek_key_file: str = "deepseek_api_key.txt"
     deepseek_model: str = "deepseek-flash"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    supabase_url: str = ""
+    supabase_audience: str = "authenticated"
+    allow_api_keys: bool = True
 
 
 @lru_cache

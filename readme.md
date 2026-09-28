@@ -4,7 +4,7 @@ Supplydesk is an auditable procurement-preparation agent designed for small and 
 
 The project targets one of the most time-consuming and error-prone parts of daily procurement preparation: manually combining spreadsheets, overlooking early stockouts, using outdated prices, selecting unapproved suppliers, and being unable to explain how order quantities were calculated. Supplydesk lets the Agent handle data organization, calculations, and tracking, while procurement staff remain responsible for exception handling and final purchasing commitments.
 
-> The current version is a single-warehouse, single-currency-per-review MVP with Purchasing Manager and Finance Manager approval stages. Repository demo data is synthetic. The system does not connect to a real ERP, contact suppliers, or automatically issue purchase orders.
+> The current version supports multiple organizations and warehouse workspaces, with Purchasing Manager and Finance Manager approval stages. Each review remains single-warehouse and single-currency. Repository demo data is synthetic. The system does not connect to a real ERP, contact suppliers, or automatically issue purchase orders.
 
 ## Core Features
 
@@ -73,7 +73,7 @@ The approval process has clear safety boundaries:
 - Version checks are used during approval to prevent an outdated page from approving a draft that has already changed.
 - If there are critical changes to quantities, prices, supplier sources, or calculation results, any existing approval is automatically invalidated and the draft returns to `NEEDS_REVIEW`.
 - Only drafts with `APPROVED` status can be exported.
-- For SGD drafts below 5,000, Purchasing Manager approval completes review. For SGD drafts of 5,000 or above, the draft enters `FINANCE_REVIEW`; Finance Manager approval is required before export. Critical changes invalidate both approvals. This threshold is a competition prototype rule, not a universal ERP standard.
+- Each workspace owns its approval currency and finance-review threshold. The initial competition workspace uses SGD 5,000: drafts below it complete after Purchasing Manager approval, while drafts at or above it enter `FINANCE_REVIEW`. Owners can change the policy for their business entity; critical changes invalidate both approvals.
 
 ### 6. Agent Explanations and Complete Audit Trail
 
@@ -192,17 +192,21 @@ The `demo/` directory contains six CSV files, equivalent JSON data, and a sample
 
 The frontend also provides three ready-to-run demo scenarios: standard procurement, a comparison of on-time versus delayed incoming purchase orders, and three exception-resolution cases. All currencies use the test code `XTS`, and all amounts are synthetic pre-tax data.
 
-## API Identity Boundaries
+## Identity and Workspace Boundaries
 
-All `/api/v1` endpoints require an `X-API-Key`:
+The hosted application uses Supabase Auth. FastAPI verifies each bearer token against the project's JWKS endpoint, then resolves the selected `X-Workspace-ID` against server-side membership records. The sidebar workspace switcher only lists organizations and warehouses that the signed-in user may access.
 
-| Identity | Environment Variable | Permissions |
-| --- | --- | --- |
-| Service / Agent | `API_KEY` | Import, run checks, generate drafts, query data, and export approved drafts. |
-| Purchasing Manager | `REVIEWER_API_KEY` | Service permissions + source corrections, draft editing, purchasing approval, and rejection. |
-| Finance Manager | `FINANCE_API_KEY` | Service permissions + final finance approval or rejection of drafts awaiting finance review. |
+| Workspace role | Permissions |
+| --- | --- |
+| Owner | Workspace settings, membership administration, procurement operations, purchasing and finance approval. |
+| Procurement | Imports, checks, corrections, draft preparation, simulations, exports after approval, and Agent access. |
+| Purchasing | Procurement permissions plus purchasing approval and rejection. |
+| Finance | Read access plus finance approval or rejection when a draft reaches finance review. |
+| Viewer | Read-only access to workspace procurement records and Agent evidence. |
 
-The three keys must be different. Demo defaults are provided in `.env.example`; replace them before external deployment and enable HTTPS. The browser profile is display-only and does not grant backend permissions. DeepSeek reads `DEEPSEEK_API_KEY` or the Git-ignored `deepseek_api_key.txt` on the backend only. With Docker Compose, supply `DEEPSEEK_API_KEY` through the environment. After updating an existing installation, run `uv run alembic upgrade head` before restarting the server.
+Every import, run, SKU result, exception, PO draft, approval event and audit entry is resolved through its owning workspace. Each workspace also owns its business entity, warehouse, currency and finance-review threshold. Email invitations become active only for an authenticated user with the same verified email address.
+
+Local development can enable legacy `X-API-Key` credentials with `ALLOW_API_KEYS=true`; the hosted Render configuration disables them. DeepSeek reads `DEEPSEEK_API_KEY` or the Git-ignored `deepseek_api_key.txt` on the backend only. After updating an existing installation, run `uv run alembic upgrade head` before restarting the server.
 
 ## Testing and Current Status
 
@@ -217,7 +221,7 @@ npm run test:e2e
 
 The current version has passed:
 
-- Backend and integration tests, including SGD threshold boundaries, role separation, export gates and invalidation of both approvals
+- Backend and integration tests, including workspace isolation, membership role enforcement, configurable threshold boundaries, export gates and invalidation of both approvals
 - 13 browser workflows including manual entry, editing, duplication/deletion, two-stage approval, export, chat navigation, and mobile layout
 - TypeScript checks and Vite production build
 - Alembic upgrade, downgrade, re-upgrade, and schema drift checks
@@ -229,6 +233,6 @@ For more detailed API and verification information, see the [API Documentation](
 
 ## Project Scope
 
-This MVP uses a single-warehouse, single-currency, and default-supplier strategy. Exported files contain human-approved procurement preparation results and are not automatically sent to suppliers. Each run is independent; any remaining open purchase orders required for the next run must be explicitly provided in the new input data.
+Each workspace represents one business entity and warehouse with its own currency, approval policy, SKU data, suppliers and procurement history. The MVP still uses a default-supplier strategy within each review. Exported files contain human-approved procurement preparation results and are not automatically sent to suppliers. Each run is independent; any remaining open purchase orders required for the next run must be explicitly provided in the new input data.
 
 The project is implemented based on the process baseline, pain-point analysis, end-to-end scenarios, business rules, and measurement plan defined in the `biz module`. The current interface does not make unsupported claims about time savings, accuracy improvements, or return on investment; these metrics should be evaluated only after collecting real manual-process baselines and pilot-run data.

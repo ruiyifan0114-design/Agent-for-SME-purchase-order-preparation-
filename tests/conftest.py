@@ -8,6 +8,9 @@ from sqlalchemy.engine import make_url
 from backend.db.session import Base
 from backend.demo import dataset, run_request
 from backend.tools.procurement import ProcurementTools
+from backend.models.entities import (
+    LEGACY_ORGANIZATION_ID, LEGACY_WORKSPACE_ID, Organization, Workspace,
+)
 
 
 @pytest.fixture
@@ -23,6 +26,13 @@ def db():
             connection.execute("PRAGMA foreign_keys=ON")
     Base.metadata.create_all(engine)
     with sessionmaker(engine, expire_on_commit=False)() as session:
+        session.add(Organization(id=LEGACY_ORGANIZATION_ID, name="Synthetic Office Co."))
+        session.add(Workspace(
+            id=LEGACY_WORKSPACE_ID, org_id=LEGACY_ORGANIZATION_ID, name="Demo workspace",
+            business_entity="Synthetic Office Co.", warehouse="SYNTHETIC-WH-1", currency="SGD",
+            finance_threshold=5000,
+        ))
+        session.commit()
         yield session
     Base.metadata.drop_all(engine)
     engine.dispose()

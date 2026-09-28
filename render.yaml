@@ -12,11 +12,11 @@ services:
         sync: false
       - key: DEEPSEEK_MODEL
         value: deepseek-flash
-      - key: API_KEY
-        generateValue: true
-      - key: REVIEWER_API_KEY
-        generateValue: true
-      - key: FINANCE_API_KEY
-        generateValue: true
+      - key: SUPABASE_URL
+        value: https://ucxldptibvbcytlqtabw.supabase.co
+      - key: SUPABASE_AUDIENCE
+        value: authenticated
+      - key: ALLOW_API_KEYS
+        value: false
       - key: CORS_ORIGINS
         value: '["https://ruiyifan0114-design.github.io"]'

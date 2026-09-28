@@ -25,6 +25,9 @@ services:
       FINANCE_REVIEWER_NAME: ${FINANCE_REVIEWER_NAME:-Demo Finance Manager}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_AUDIENCE: ${SUPABASE_AUDIENCE:-authenticated}
+      ALLOW_API_KEYS: ${ALLOW_API_KEYS:-true}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

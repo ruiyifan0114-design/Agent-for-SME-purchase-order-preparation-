@@ -6,11 +6,11 @@ Updated 2026-09-28. Dataset and business values are synthetic.
 | --- | --- |
 | Python | CPython 3.12.13, project-local virtual environment |
 | PostgreSQL | 16.15, isolated WSL instance on localhost:55432 |
-| Full test suite on PostgreSQL | **85 passed**, including concurrent draft generation, SGD threshold boundaries and manager role isolation |
+| Full test suite | **87 passed** (1 PostgreSQL concurrency test skipped on SQLite), including workspace isolation, membership enforcement, configurable thresholds and manager role isolation |
 | SQLite tests | **84 passed**, PostgreSQL-only row-lock test skipped |
 | Static checks | `ruff check backend tests migrations agent.py` passed |
 | Alembic | SQLite upgrade → downgrade → upgrade passed; existing PostgreSQL demo upgrade and schema check passed |
-| Supabase | Project database initialized at migration `7b21e9c46f30`; 15 public tables; FastAPI `/ready` returned 200; effective `anon`/`authenticated` table access count is 0 |
+| Supabase | Project database upgraded through `8d34fa21c670`; procurement tables remain inaccessible directly to `anon`/`authenticated`; FastAPI validates Supabase Auth JWTs and workspace membership |
 | Schema drift | `alembic check`: no new upgrade operations |
 | HTTP adapters | JSON, six CSVs, six-sheet XLSX through FastAPI tested |
 | Original Biz templates | Placeholder lead time normalized; missing commercial data blocked |
@@ -22,7 +22,7 @@ Updated 2026-09-28. Dataset and business values are synthetic.
 | Visual inspection | Desktop 1440px and mobile 390px screenshots inspected; mobile overflow check passed |
 | DeepSeek provider | Tool loop, failure handling, private-reasoning isolation and free-form routing tested with mocks; real provider smoke test completed in the preceding chatbot upgrade |
 
-Backend tests create/drop their own tables and require a PostgreSQL database name ending `_test`. This revision's browser tests use an isolated `.runtime` SQLite database and production assets on port 8010. Chat-provider responses are mocked in the navigation/history browser test. No external orders are sent. The browser profile is display-only; role-specific backend credentials grant access.
+Backend tests create/drop their own tables and require a PostgreSQL database name ending `_test`. This revision's browser tests use an isolated `.runtime` SQLite database and production assets on port 8010. Chat-provider responses are mocked in the navigation/history browser test. No external orders are sent. Hosted identity comes from Supabase Auth and authorization comes from workspace memberships stored by FastAPI.
 
 There is one upstream Starlette TestClient deprecation warning about its httpx adapter; tests currently pass. No warning is suppressed.
 

@@ -1,12 +1,19 @@
 # Frontend API contract
 
-Base: `/api/v1`. Send `X-API-Key` on every request. `/docs` provides the request schemas.
+Base: `/api/v1`. Hosted clients send `Authorization: Bearer <Supabase access token>`. Workspace-scoped routes also send an authorized `X-Workspace-ID`. Local-only legacy clients may use `X-API-Key` when `ALLOW_API_KEYS=true`. `/docs` provides the request schemas.
 Dates use ISO strings, timestamps include timezone, money is serialized as decimal **strings**.
 Success: `{"data": ...}`. Errors: `{"error":{"code":"...","message":"..."}}`.
 Validation errors add `details` with field locations. CSV export returns a download response.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/workspaces` | List only the signed-in user's workspace memberships |
+| POST | `/workspaces` | Create an organization/workspace and become its owner |
+| PATCH | `/workspaces/{id}` | Owner updates business entity, warehouse, currency or approval threshold |
+| GET | `/workspaces/{id}/members` | Owner lists workspace members |
+| POST | `/workspaces/{id}/members` | Owner invites a member by email and assigns a role |
+| PATCH | `/workspaces/{id}/members/{member_id}` | Owner changes a member's profile or role |
+| DELETE | `/workspaces/{id}/members/{member_id}` | Owner removes a non-owner member |
 | POST | `/imports` | Import JSON containing all six tables |
 | POST | `/imports/upload` | Multipart `files`: six CSVs or one six-sheet XLSX |
 | GET | `/imports` | Batches, `limit` (1–500), `offset` |
@@ -27,7 +34,7 @@ Validation errors add `details` with field locations. CSV export returns a downl
 | GET | `/drafts/{id}` | Header, current version, lines, source references |
 | PATCH | `/drafts/{id}/lines/{line_id}` | Human quantity/price edit; invalidate approval |
 | POST | `/drafts/{id}/approve` | Explicit human approval |
-| POST | `/drafts/{id}/finance-approve` | Finance credential; SGD >=5,000 after Purchasing approval |
+| POST | `/drafts/{id}/finance-approve` | Finance role after Purchasing approval when the workspace threshold applies |
 | POST | `/drafts/{id}/reject` | Human rejection |
 | GET | `/drafts/{id}/export` | Approved-only pre-tax synthetic CSV |
 | GET | `/drafts/{id}/history` | Approval/rejection/invalidation/export snapshots |
@@ -71,13 +78,13 @@ At least one of quantity/unit_price is required. MOQ and pack constraints still 
 {"expected_version":4,"confirm":true,"comment":"Reviewed price, quantities, and lead-time warnings"}
 ```
 
-Every mutation changes the relevant version/revision. On `409 VERSION_CONFLICT`, refresh and review the new data. `403 HUMAN_REQUIRED` means the service credential cannot perform this action; `403 REVIEWER_ROLE_REQUIRED` indicates the wrong manager credential. `409 APPROVAL_REQUIRED` and `409 FINANCE_APPROVAL_REQUIRED` prevent final export. `409 PO_AMOUNT_MISMATCH` blocks corrupted amounts. Critical edits clear both approvals.
+Every mutation changes the relevant version/revision. On `409 VERSION_CONFLICT`, refresh and review the new data. `401` means the Supabase token is missing, expired or invalid. `403 WORKSPACE_ACCESS_DENIED` means the user is not a member of the selected workspace; other 403 responses identify a missing workspace role. `409 APPROVAL_REQUIRED` and `409 FINANCE_APPROVAL_REQUIRED` prevent final export. `409 PO_AMOUNT_MISMATCH` blocks corrupted amounts. Critical edits clear both approvals.
 
 ## State semantics
 
 - Run `CREATED` → `RUNNING` → `COMPLETED` or `NEEDS_ATTENTION`. These describe the scan, independently of PO approval.
 - Every run contains one result per active SKU, initially BLOCKED with revision 0 / pending reason. Only evaluated results count as processed. After the full check, processed count equals expected count and each result is NO_REORDER, REORDER or BLOCKED.
-- Draft `DRAFT` / `NEEDS_REVIEW` → Purchasing approval → `APPROVED`, or `FINANCE_REVIEW` for SGD totals >=5,000 → Finance approval → `APPROVED`. Purchasing may reject; Finance may reject drafts awaiting Finance review. Source/critical changes clear both approvals and return to `NEEDS_REVIEW`.
+- Draft `DRAFT` / `NEEDS_REVIEW` → Purchasing approval → `APPROVED`, or `FINANCE_REVIEW` when the workspace currency/threshold applies → Finance approval → `APPROVED`. Purchasing may reject; Finance may reject drafts awaiting Finance review. Source/critical changes clear both approvals and return to `NEEDS_REVIEW`.
 - Exception OPEN → RESOLVED by an accepted correction, or SUPERSEDED by a later evaluation. History is retained.
 
 Inspect `severity`: WARNING does not block a line, BLOCKING does. Show `decision_reason`, `evidence.timeline`, exception messages, and expected delivery dates to the reviewer. Do not calculate or infer approval state in the frontend.

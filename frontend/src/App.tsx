@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import {
   Activity,
   AlertCircle,
@@ -22,12 +23,14 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { api, setCredentials } from './api'
+import { api, setAuthContext, setCredentials } from './api'
+import { cloudAuthEnabled, supabase } from './auth'
 import AgentPanel from './AgentPanel'
 import type { EditableDataset } from './DatasetEditor'
 import { Badge, Button, ErrorNotice, Evidence, Loading, Modal, shortId } from './components'
 import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
 import { PublicExperience, type WorkspaceUser } from './PublicExperience'
+import { WorkspaceManager } from './WorkspaceManager'
 import {
   AuditScreen,
   CockpitScreen,
@@ -53,6 +56,7 @@ import type {
   Line,
   Run,
   RunRequest,
+  Workspace,
 } from './types'
 
 const navigation = [
@@ -74,6 +78,7 @@ type Dialog =
   | { kind: 'connection' }
   | { kind: 'account' }
   | { kind: 'help' }
+  | { kind: 'workspace' }
 function initialCredentials(): Credentials {
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
   const defaults = {
@@ -92,7 +97,15 @@ function initialScreen(): Screen {
   return navigation.some((n) => n.id === hash) ? (hash as Screen) : 'dashboard'
 }
 
-function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () => void }) {
+function WorkspaceApp({
+  user,
+  accessToken,
+  onSignOut,
+}: {
+  user: WorkspaceUser
+  accessToken: string
+  onSignOut: () => void
+}) {
   const [credentials, saveCredentials] = useState(initialCredentials),
     [screen, setScreen] = useState<Screen>(initialScreen),
     [mobileMenu, setMobileMenu] = useState(false)
@@ -111,10 +124,15 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     [toast, setToast] = useState(''),
     [dialog, setDialog] = useState<Dialog | null>(null),
     [chat, setChat] = useState(false)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]),
+    [workspaceId, setWorkspaceId] = useState(''),
+    [workspaceReady, setWorkspaceReady] = useState(false)
   const generation = useRef(0),
     auditOffset = useRef(0),
     currentId = useRef('')
   setCredentials(credentials)
+  setAuthContext(accessToken, workspaceId)
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) || null
   const closeDialog = useCallback(() => setDialog(null), [])
   const go = (value: Screen) => {
     setScreen(value)
@@ -132,6 +150,25 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     window.addEventListener('hashchange', fn)
     return () => window.removeEventListener('hashchange', fn)
   }, [])
+  const reloadWorkspaces = useCallback(async (preferred?: string) => {
+    setAuthContext(accessToken, '')
+    const available = await api.workspaces()
+    const saved = sessionStorage.getItem('supplydesk-workspace')
+    const selected = available.find((workspace) => workspace.id === (preferred || saved)) || available[0]
+    setWorkspaces(available)
+    setWorkspaceId(selected?.id || '')
+    if (selected) sessionStorage.setItem('supplydesk-workspace', selected.id)
+    setAuthContext(accessToken, selected?.id || '')
+    setWorkspaceReady(true)
+    if (!selected) setDialog({ kind: 'workspace' })
+  }, [accessToken])
+  useEffect(() => {
+    setWorkspaceReady(false)
+    void reloadWorkspaces().catch((e) => {
+      setError(e instanceof Error ? e.message : 'Unable to load workspace access')
+      setWorkspaceReady(true)
+    })
+  }, [reloadWorkspaces, credentials])
   const loadRun = useCallback(async (id: string) => {
     const seq = ++generation.current
     setLoading(true)
@@ -154,6 +191,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     }
   }, [])
   const bootstrap = useCallback(async () => {
+    if (!workspaceId) return
     setError('')
     setLoading(true)
     try {
@@ -178,10 +216,25 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
     } finally {
       setLoading(false)
     }
-  }, [loadRun])
+  }, [loadRun, workspaceId])
   useEffect(() => {
-    void bootstrap()
-  }, [bootstrap, credentials])
+    if (workspaceReady && workspaceId) void bootstrap()
+  }, [bootstrap, workspaceReady, workspaceId])
+  const selectWorkspace = (id: string) => {
+    if (id === workspaceId) return
+    setWorkspaceId(id)
+    setAuthContext(accessToken, id)
+    sessionStorage.setItem('supplydesk-workspace', id)
+    sessionStorage.removeItem('supplydesk-run')
+    currentId.current = ''
+    setRuns([])
+    setBatches([])
+    setRun(null)
+    setResults([])
+    setExceptions([])
+    setDrafts([])
+    setCockpit(null)
+  }
   useEffect(() => {
     if (screen === 'audit') {
       auditOffset.current = 0
@@ -242,17 +295,14 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
       notify('Load a demo scenario or upload a validated dataset first.')
       return
     }
-    const inventory = chosen.raw_data?.inventory_snapshot?.[0],
-      supplier = chosen.raw_data?.supplier_master?.find((s) => s.currency)
+    const inventory = chosen.raw_data?.inventory_snapshot?.[0]
     setDialog({
       kind: 'run',
       initial: {
         batch_id: chosen.id,
         as_of: typeof inventory?.snapshot_date === 'string' ? inventory.snapshot_date : undefined,
-        currency: typeof supplier?.currency === 'string' ? supplier.currency : '',
-        warehouse: chosen.filename.startsWith('synthetic-')
-          ? 'SYNTHETIC-WH-1'
-          : run?.warehouse || '',
+        currency: activeWorkspace?.currency || 'SGD',
+        warehouse: activeWorkspace?.warehouse || run?.warehouse || '',
         ...initial,
       },
     })
@@ -441,13 +491,18 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
             Supplydesk<small>PROCUREMENT WORKSPACE</small>
           </span>
         </a>
-        <div className="workspace-switch">
-          <span className="workspace-avatar">S</span>
+        <button
+          className="workspace-switch"
+          aria-label={`Switch workspace${activeWorkspace ? `: ${activeWorkspace.business_entity}, ${activeWorkspace.warehouse}` : ''}`}
+          onClick={() => setDialog({ kind: 'workspace' })}
+        >
+          <span className="workspace-avatar">{activeWorkspace?.business_entity[0]?.toUpperCase() || 'W'}</span>
           <span>
-            Synthetic Office Co.<small>Single warehouse workspace</small>
+            {activeWorkspace?.business_entity || 'Set up workspace'}
+            <small>{activeWorkspace ? `${activeWorkspace.warehouse} · ${activeWorkspace.role}` : 'No workspace access'}</small>
           </span>
           <ChevronDown size={14} />
-        </div>
+        </button>
         <span className="nav-eyebrow">WORKSPACE</span>
         <nav>
           {navigation.map((item) => (
@@ -499,7 +554,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
             <span className="profile-avatar">{user.initials}</span>
             <span>
               {user.name}
-              <small>{user.role}</small>
+              <small>{activeWorkspace?.role || user.role}</small>
             </span>
             <UserRound size={15} />
           </button>
@@ -544,7 +599,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
               <span className="top-avatar">{user.initials}</span>
               <span>
                 {user.name}
-                <small>{user.role}</small>
+                <small>{activeWorkspace?.role || user.role}</small>
               </span>
               <ChevronDown size={14} />
             </button>
@@ -689,7 +744,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
       )}
       {chat && (
         <AgentPanel
-          key={run?.id || 'no-run'}
+          key={workspaceId || 'no-workspace'}
           runId={run?.id}
           onClose={() => setChat(false)}
           onAction={agentAction}
@@ -784,7 +839,26 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
           </div>
         </Modal>
       )}
-      {dialog?.kind === 'connection' && (
+      {dialog?.kind === 'workspace' && (
+        <Modal
+          title="Workspaces"
+          subtitle="Switch business entities and warehouses, or manage access."
+          onClose={workspaces.length ? closeDialog : onSignOut}
+        >
+          <div className="modal-body">
+            <WorkspaceManager
+              workspaces={workspaces}
+              active={activeWorkspace}
+              onSelect={selectWorkspace}
+              onReload={async (id) => {
+                await reloadWorkspaces(id)
+                if (id) selectWorkspace(id)
+              }}
+            />
+          </div>
+        </Modal>
+      )}
+      {dialog?.kind === 'connection' && !cloudAuthEnabled && (
         <ConnectionForm
           value={credentials}
           onClose={closeDialog}
@@ -798,7 +872,7 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
       {dialog?.kind === 'account' && (
         <Modal
           title="Account"
-          subtitle="Local display profile and workspace connection"
+          subtitle={cloudAuthEnabled ? 'Authenticated account and workspace membership' : 'Local display profile and workspace connection'}
           onClose={closeDialog}
         >
           <div className="modal-body account-panel">
@@ -812,21 +886,26 @@ function WorkspaceApp({ user, onSignOut }: { user: WorkspaceUser; onSignOut: () 
             <dl className="account-details">
               <div>
                 <dt>Display role</dt>
-                <dd>{user.role}</dd>
+                <dd>{activeWorkspace?.role || user.role}</dd>
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd>Local procurement demo</dd>
+                <dd>{activeWorkspace ? `${activeWorkspace.business_entity} · ${activeWorkspace.warehouse}` : 'No workspace'}</dd>
               </div>
               <div>
                 <dt>Access</dt>
-                <dd>Permissions verified by backend API credentials</dd>
+                <dd>{cloudAuthEnabled ? 'Supabase session and workspace RBAC' : 'Backend API credentials'}</dd>
               </div>
             </dl>
             <div className="modal-actions account-actions">
-              <Button kind="secondary" onClick={() => setDialog({ kind: 'connection' })}>
-                <Settings2 size={15} /> Connection settings
+              <Button kind="secondary" onClick={() => setDialog({ kind: 'workspace' })}>
+                <Settings2 size={15} /> Manage workspace
               </Button>
+              {!cloudAuthEnabled && (
+                <Button kind="secondary" onClick={() => setDialog({ kind: 'connection' })}>
+                  <Settings2 size={15} /> Connection settings
+                </Button>
+              )}
               <Button kind="secondary" onClick={onSignOut}>
                 <LogOut size={15} /> Sign out
               </Button>
@@ -900,16 +979,49 @@ function savedUser(): WorkspaceUser | null {
 
 export default function App() {
   const directWorkspace = navigation.some((item) => location.hash.slice(1) === item.id)
-  const [user, setUser] = useState<WorkspaceUser | null>(() => savedUser())
-  const [workspace, setWorkspace] = useState(() => directWorkspace || Boolean(savedUser()))
+  const [user, setUser] = useState<WorkspaceUser | null>(() => cloudAuthEnabled ? null : savedUser())
+  const [workspace, setWorkspace] = useState(() => !cloudAuthEnabled && (directWorkspace || Boolean(savedUser())))
+  const [accessToken, setAccessToken] = useState('')
+  const [authReady, setAuthReady] = useState(!cloudAuthEnabled)
+
+  useEffect(() => {
+    const client = supabase
+    if (!cloudAuthEnabled || !client) return
+    const applySession = (session: Session | null) => {
+      if (!session) {
+        setAccessToken('')
+        setUser(null)
+        setWorkspace(false)
+        setAuthReady(true)
+        return
+      }
+      const metadata = session.user.user_metadata || {}
+      const name = String(metadata.full_name || metadata.name || session.user.email?.split('@')[0] || 'Member')
+      setAccessToken(session.access_token)
+      setUser({
+        name,
+        email: session.user.email || '',
+        role: 'Workspace member',
+        initials: name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'WM',
+      })
+      setWorkspace(true)
+      setAuthReady(true)
+      if (!navigation.some((item) => location.hash.slice(1) === item.id)) location.hash = 'dashboard'
+    }
+    void client.auth.getSession().then(({ data }) => applySession(data.session))
+    const { data } = client.auth.onAuthStateChange((_event, session) => applySession(session))
+    return () => data.subscription.unsubscribe()
+  }, [])
 
   const enter = (next: WorkspaceUser = demoUser) => {
+    if (cloudAuthEnabled) return
     sessionStorage.setItem('supplydesk-user', JSON.stringify(next))
     setUser(next)
     setWorkspace(true)
     if (!navigation.some((item) => location.hash.slice(1) === item.id)) location.hash = 'dashboard'
   }
   const signOut = () => {
+    if (cloudAuthEnabled && supabase) void supabase.auth.signOut()
     sessionStorage.removeItem('supplydesk-user')
     sessionStorage.removeItem('supplydesk-access')
     sessionStorage.removeItem('supplydesk-run')
@@ -918,8 +1030,9 @@ export default function App() {
     history.replaceState(null, '', location.pathname)
   }
 
+  if (!authReady) return <div className="app-loading"><Loading /></div>
   return workspace ? (
-    <WorkspaceApp user={user || demoUser} onSignOut={signOut} />
+    <WorkspaceApp user={user || demoUser} accessToken={accessToken} onSignOut={signOut} />
   ) : (
     <PublicExperience onEnter={enter} />
   )

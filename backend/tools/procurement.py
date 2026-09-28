@@ -11,24 +11,40 @@ from backend.domain.engine import amount, evaluate
 from backend.domain.intake import normalize, read_files
 from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest, SimulationRequest
 from backend.models.entities import (ApprovalEvent, Demand, ExceptionRecord, ImportBatch, Inventory,
-    OpenPO, PODraft, POLine, ProcurementRun, SKU, SKUCheckResult, Supplier, SupplierSKU, ToolExecutionLog, now)
+    LEGACY_WORKSPACE_ID, OpenPO, PODraft, POLine, ProcurementRun, SKU, SKUCheckResult,
+    Supplier, SupplierSKU, ToolExecutionLog, Workspace, now)
 from backend.tools.runtime import BusinessError, audited, serial
 
 TABLE_MODELS = {"sku_master": SKU, "supplier_master": Supplier, "supplier_sku": SupplierSKU,
                 "inventory_snapshot": Inventory, "demand": Demand, "open_po": OpenPO}
-FINANCE_APPROVAL_THRESHOLD = Decimal("5000")
-
-
 class ProcurementTools:
-    def __init__(self, db, actor="service", human=False, role="purchasing"):
+    def __init__(self, db, actor="service", human=False, role="purchasing", workspace_id=LEGACY_WORKSPACE_ID):
         self.db, self.actor, self.human, self.role = db, actor, human, role
+        self.workspace_id = workspace_id
+
+    def _resource_workspace(self, obj):
+        if isinstance(obj, (ImportBatch, ToolExecutionLog)):
+            return obj.workspace_id
+        if isinstance(obj, (SKU, Supplier, SupplierSKU, Inventory, Demand, OpenPO)):
+            batch = self.db.get(ImportBatch, obj.batch_id)
+            return batch.workspace_id if batch else None
+        if isinstance(obj, ProcurementRun):
+            batch = self.db.get(ImportBatch, obj.batch_id)
+            return batch.workspace_id if batch else None
+        if isinstance(obj, (SKUCheckResult, ExceptionRecord, PODraft)):
+            run = self.db.get(ProcurementRun, obj.run_id)
+            return self._resource_workspace(run) if run else None
+        if isinstance(obj, (POLine, ApprovalEvent)):
+            draft = self.db.get(PODraft, obj.draft_id)
+            return self._resource_workspace(draft) if draft else None
+        return None
 
     def _get(self, model, identifier, lock=False):
         query = select(model).where(model.id == identifier)
         if lock:
             query = query.with_for_update()
         obj = self.db.scalar(query.execution_options(populate_existing=True))
-        if obj is None:
+        if obj is None or self._resource_workspace(obj) != self.workspace_id:
             raise BusinessError("Resource not found", "NOT_FOUND", 404)
         return obj
 
@@ -38,20 +54,20 @@ class ProcurementTools:
     def _human(self, role="purchasing"):
         if not self.human or not self.actor.strip():
             raise BusinessError("Explicit authenticated human action required", "HUMAN_REQUIRED", 403)
-        if self.role != role:
+        if self.role not in {role, "owner"}:
             raise BusinessError(f"This action requires the {role} reviewer role", "REVIEWER_ROLE_REQUIRED", 403)
 
     def _import(self, raw, filename):
         try:
             data, issues = normalize(raw)
         except ValueError as exc:
-            batch = ImportBatch(filename=filename, status="REJECTED", synthetic=True,
+            batch = ImportBatch(workspace_id=self.workspace_id, filename=filename, status="REJECTED", synthetic=True,
                 raw_data=serial(raw), source_hash=hashlib.sha256(json.dumps(serial(raw), sort_keys=True).encode()).hexdigest(),
                 issues=[{"code": "INVALID_DATASET", "message": str(exc)}])
             self.db.add(batch)
             self.db.flush()
             return batch
-        batch = ImportBatch(filename=filename, status="VALIDATED_WITH_ISSUES" if issues else "VALIDATED",
+        batch = ImportBatch(workspace_id=self.workspace_id, filename=filename, status="VALIDATED_WITH_ISSUES" if issues else "VALIDATED",
             synthetic=True, raw_data=serial(raw), issues=issues,
             source_hash=hashlib.sha256(json.dumps(serial(raw), sort_keys=True).encode()).hexdigest())
         self.db.add(batch)
@@ -150,7 +166,7 @@ class ProcurementTools:
             draft.total = sum((r.amount for r in self._rows(POLine, draft_id=draft.id)), Decimal(0))
             self._invalidate(draft, "Source decision rerun; regenerate PO drafts before review")
         self.db.flush()
-        self.db.add(ToolExecutionLog(tool_name="evaluate_sku", actor=self.actor, status="SUCCESS",
+        self.db.add(ToolExecutionLog(workspace_id=self.workspace_id, tool_name="evaluate_sku", actor=self.actor, status="SUCCESS",
             input={"previous": previous}, output=serial(result)))
         return result
 
@@ -179,6 +195,7 @@ class ProcurementTools:
 
     @audited
     def get_sku_context(self, run_id, sku_id):
+        self._get(ProcurementRun, run_id)
         rows = self._rows(SKUCheckResult, run_id=run_id, sku_id=sku_id)
         if not rows:
             raise BusinessError("SKU not in run", "NOT_FOUND", 404)
@@ -237,11 +254,18 @@ class ProcurementTools:
         return {"result": serial(result), "before": before, "reason": request.reason}
 
     def _draft(self, draft):
+        workspace = self.db.get(Workspace, self.workspace_id)
+        if workspace is None:
+            raise BusinessError("Workspace not found", "NOT_FOUND", 404)
         obj = serial(draft)
         obj["po_number"] = f"PO-{draft.id}"
         obj["tax_treatment"] = "PRE_TAX"
         obj["synthetic"] = True
         obj["requires_finance_review"] = self._requires_finance(draft)
+        obj["approval_policy"] = {
+            "currency": workspace.currency,
+            "finance_threshold": str(workspace.finance_threshold),
+        }
         obj["approval_stage"] = (
             "COMPLETE" if draft.status == "APPROVED" else
             "FINANCE" if draft.status == "FINANCE_REVIEW" else "PURCHASING"
@@ -250,7 +274,10 @@ class ProcurementTools:
         return obj
 
     def _requires_finance(self, draft):
-        return draft.currency == "SGD" and draft.total >= FINANCE_APPROVAL_THRESHOLD
+        workspace = self.db.get(Workspace, self.workspace_id)
+        if workspace is None:
+            raise BusinessError("Workspace not found", "NOT_FOUND", 404)
+        return draft.currency == workspace.currency and draft.total >= workspace.finance_threshold
 
     @audited
     def generate_po_drafts(self, run_id):
@@ -327,7 +354,10 @@ class ProcurementTools:
         drafts = self._rows(PODraft, run_id=run_id)
         current["approved_value"] = str(sum((d.total for d in drafts if d.status == "APPROVED"), Decimal(0)))
         current["approval_progress"] = round(sum(d.status == "APPROVED" for d in drafts) / len(drafts) * 100) if drafts else 0
-        previous = self.db.scalar(select(ProcurementRun).where(
+        previous = self.db.scalar(select(ProcurementRun).join(
+            ImportBatch, ProcurementRun.batch_id == ImportBatch.id
+        ).where(
+            ImportBatch.workspace_id == self.workspace_id,
             ProcurementRun.id != run.id, ProcurementRun.created_at < run.created_at
         ).order_by(ProcurementRun.created_at.desc()).limit(1))
         comparison = {"previous_run_id": None, "changes": [], "summary": {}}
@@ -457,7 +487,7 @@ class ProcurementTools:
         draft = self._locked_draft(draft_id)
         self._version(draft, request.expected_version)
         if not self._requires_finance(draft):
-            raise BusinessError("Finance review is only required for SGD drafts of 5,000 or above")
+            raise BusinessError("This draft does not meet the workspace Finance review threshold")
         if draft.status != "FINANCE_REVIEW" or not draft.reviewer or not draft.approved_at:
             raise BusinessError("Purchasing Manager approval is required before Finance review", "PURCHASING_APPROVAL_REQUIRED")
         self._approval_gate(draft)
@@ -469,8 +499,9 @@ class ProcurementTools:
 
     @audited
     def reject_po(self, draft_id, request: Review):
-        self._human(self.role if self.role in {"purchasing", "finance"} else "purchasing")
         draft = self._locked_draft(draft_id)
+        required_role = "finance" if draft.status == "FINANCE_REVIEW" else "purchasing"
+        self._human(required_role)
         self._version(draft, request.expected_version)
         if self.role == "finance" and draft.status != "FINANCE_REVIEW":
             raise BusinessError("Finance can reject only drafts awaiting Finance review")
@@ -486,7 +517,7 @@ class ProcurementTools:
         if draft.status != "APPROVED" or not draft.reviewer or not draft.approved_at:
             raise BusinessError("Only explicitly human-approved POs may be exported", "APPROVAL_REQUIRED")
         if self._requires_finance(draft) and (not draft.finance_reviewer or not draft.finance_approved_at):
-            raise BusinessError("Finance Manager approval is required for SGD drafts of 5,000 or above", "FINANCE_APPROVAL_REQUIRED")
+            raise BusinessError("Finance Manager approval is required by the workspace policy", "FINANCE_APPROVAL_REQUIRED")
         self._approval_gate(draft)
         output = io.StringIO(newline="")
         columns = ["po_number", "run_id", "supplier_id", "supplier_name", "currency", "warehouse", "order_date",
@@ -507,7 +538,13 @@ class ProcurementTools:
     @audited
     def list_resources(self, kind, limit=100, offset=0):
         model = {"imports": ImportBatch, "runs": ProcurementRun, "audit": ToolExecutionLog}[kind]
-        return list(self.db.scalars(select(model).order_by(model.created_at.desc(), model.id).offset(offset).limit(limit)))
+        if kind in {"imports", "audit"}:
+            query = select(model).where(model.workspace_id == self.workspace_id)
+        else:
+            query = select(ProcurementRun).join(
+                ImportBatch, ProcurementRun.batch_id == ImportBatch.id
+            ).where(ImportBatch.workspace_id == self.workspace_id)
+        return list(self.db.scalars(query.order_by(model.created_at.desc(), model.id).offset(offset).limit(limit)))
 
     @audited
     def approval_history(self, draft_id):
