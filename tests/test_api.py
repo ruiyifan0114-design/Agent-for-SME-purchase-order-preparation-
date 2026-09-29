@@ -107,6 +107,22 @@ def test_rejected_import_cannot_run(client, data):
     assert client.post("/api/v1/runs", json=request).status_code == 409
 
 
+def test_unused_import_can_be_deleted_but_review_evidence_is_retained(client, data):
+    unused = client.post("/api/v1/imports", json=data, params={"filename": "unused.json"}).json()["data"]
+    deleted = client.delete(f'/api/v1/imports/{unused["id"]}')
+    assert deleted.status_code == 200
+    assert deleted.json()["data"] == {"id": unused["id"], "deleted": True}
+    assert client.get(f'/api/v1/imports/{unused["id"]}').status_code == 404
+
+    used = client.post("/api/v1/imports", json=data, params={"filename": "used.json"}).json()["data"]
+    request = run_request(used["id"], date(2026, 9, 27)).model_dump(mode="json")
+    assert client.post("/api/v1/runs", json=request).status_code == 201
+    blocked = client.delete(f'/api/v1/imports/{used["id"]}')
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "IMPORT_IN_USE"
+    assert client.get(f'/api/v1/imports/{used["id"]}').status_code == 200
+
+
 def test_original_business_templates_are_normalized(client, data):
     files = csv_files(data)
     root = Path(__file__).resolve().parents[1] / "biz module"

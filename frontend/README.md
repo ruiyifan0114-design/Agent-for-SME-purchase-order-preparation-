@@ -18,7 +18,7 @@ For a single-origin preview, run `npm run build`, then start or restart FastAPI.
 
 ## Credentials
 
-Connection settings accept service, Purchasing Manager and Finance Manager credentials, stored in sessionStorage for this tab and cleared on sign-out. Defaults match `.env.example`. DeepSeek credentials are read only by the backend from `DEEPSEEK_API_KEY` or the ignored root `deepseek_api_key.txt`.
+The hosted frontend connects automatically after Supabase sign-in; users never enter backend access keys. Local development uses the explicit demo credentials from `.env.example`. DeepSeek credentials are read only by the backend from `DEEPSEEK_API_KEY` or the ignored root `deepseek_api_key.txt`.
 
 ## Demo walkthrough
 

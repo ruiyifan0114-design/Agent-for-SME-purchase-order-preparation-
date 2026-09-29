@@ -365,6 +365,13 @@ test('JSON filename survives intake and rejected datasets stay visible', async (
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(demo.dataset)),
   })
+  await page.getByRole('button', { name: 'Remove selected file invalid-duplicate-master.json' }).click()
+  await expect(page.getByRole('button', { name: 'Upload & validate' })).toHaveCount(0)
+  await page.getByLabel('Upload source files').setInputFiles({
+    name: 'invalid-duplicate-master.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(demo.dataset)),
+  })
   await page.getByRole('button', { name: 'Upload & validate' }).click()
   await expect(page.getByRole('alert')).toContainText('Import rejected')
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -373,4 +380,9 @@ test('JSON filename survives intake and rejected datasets stay visible', async (
   await batch.locator('summary').click()
   await expect(batch).toContainText('unique')
   await expect(batch.getByRole('button', { name: 'Run check with this batch' })).toHaveCount(0)
+  await batch.getByRole('button', { name: 'Delete import' }).click()
+  const deletion = page.getByRole('dialog', { name: 'Delete this import?' })
+  await deletion.getByRole('button', { name: 'Delete import' }).click()
+  await expect(deletion).toBeHidden()
+  await expect(batch).toHaveCount(0)
 })

@@ -6,7 +6,7 @@ from copy import deepcopy
 from collections import Counter
 from datetime import date
 from decimal import Decimal
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from backend.domain.engine import amount, evaluate
 from backend.domain.intake import normalize, read_files
 from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest, SimulationRequest
@@ -94,6 +94,23 @@ class ProcurementTools:
     def validate_import(self, batch_id):
         batch = self._get(ImportBatch, batch_id)
         return {"id": batch.id, "status": batch.status, "issues": batch.issues}
+
+    @audited
+    def delete_import(self, batch_id):
+        batch = self._get(ImportBatch, batch_id)
+        run_id = self.db.scalar(
+            select(ProcurementRun.id).where(ProcurementRun.batch_id == batch.id).limit(1)
+        )
+        if run_id:
+            raise BusinessError(
+                "This import is already used by a procurement review and must be retained for audit history",
+                "IMPORT_IN_USE",
+                409,
+            )
+        for model in (SupplierSKU, Inventory, Demand, OpenPO, Supplier, SKU):
+            self.db.execute(delete(model).where(model.batch_id == batch.id))
+        self.db.delete(batch)
+        return {"id": batch_id, "deleted": True}
 
     def _context(self, batch_id, sku):
         def clean(row):

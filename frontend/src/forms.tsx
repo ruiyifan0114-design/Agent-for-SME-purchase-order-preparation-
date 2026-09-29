@@ -6,7 +6,6 @@ import type {
   Batch,
   Check as Result,
   Context,
-  Credentials,
   Draft,
   ExceptionItem,
   Line,
@@ -570,71 +569,6 @@ export function ReviewForm({
             {state.busy && <Loader2 className="spin" size={16} />}Confirm{' '}
             {reject ? 'rejection' : 'approval'}
           </Button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-export function ConnectionForm({
-  value,
-  onSave,
-  onClose,
-}: {
-  value: Credentials
-  onSave: (v: Credentials) => void
-  onClose: () => void
-}) {
-  const [form, setForm] = useState(value)
-  return (
-    <Modal
-      title="Workspace connection"
-      subtitle="Backend access credentials for this browser tab."
-      onClose={onClose}
-    >
-      <form
-        className="modal-body"
-        onSubmit={(e) => {
-          e.preventDefault()
-          onSave(form)
-        }}
-      >
-        <Field label="Service access key">
-          <input
-            required
-            type="password"
-            autoComplete="off"
-            value={form.service}
-            onChange={(e) => setForm({ ...form, service: e.target.value })}
-          />
-        </Field>
-        <Field label="Human reviewer access key">
-          <input
-            required
-            type="password"
-            autoComplete="off"
-            value={form.reviewer}
-            onChange={(e) => setForm({ ...form, reviewer: e.target.value })}
-          />
-        </Field>
-        <Field label="Finance Manager access key">
-          <input
-            required
-            type="password"
-            autoComplete="off"
-            value={form.finance}
-            onChange={(e) => setForm({ ...form, finance: e.target.value })}
-          />
-        </Field>
-        <p className="muted">
-          Use the workspace credentials from your backend configuration. Your DeepSeek provider key
-          stays on the server and does not belong in these fields. Access keys are kept in this
-          tab’s session only.
-        </p>
-        <div className="modal-actions">
-          <Button kind="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit">Save connection</Button>
         </div>
       </form>
     </Modal>

@@ -1161,7 +1161,18 @@ strong {
   color: #9aa692;
   font-size: 8px;
 }
-.selected-files > .button {
+.selected-files > span > button {
+  display: grid;
+  place-items: center;
+  color: #8b5d50;
+  padding: 2px;
+  border-radius: 4px;
+}
+.selected-files > span > button:hover {
+  background: #f8ece8;
+  color: #973f2b;
+}
+.selected-files > .button:last-child {
   margin-left: auto;
 }
 .batch summary {

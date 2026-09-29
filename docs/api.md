@@ -18,6 +18,7 @@ Validation errors add `details` with field locations. CSV export returns a downl
 | POST | `/imports/upload` | Multipart `files`: six CSVs or one six-sheet XLSX |
 | GET | `/imports` | Batches, `limit` (1–500), `offset` |
 | GET | `/imports/{id}` | Stored validation status/issues |
+| DELETE | `/imports/{id}` | Delete an unused import; batches referenced by a review remain immutable audit evidence |
 | POST | `/runs` | Create run and freeze every active SKU context |
 | GET | `/runs` | Runs, pagination |
 | POST | `/runs/{id}/check` | Evaluate all not-yet-processed SKUs |

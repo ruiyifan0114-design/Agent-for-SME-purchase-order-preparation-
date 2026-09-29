@@ -7,7 +7,6 @@ import type {
   Check,
   Cockpit,
   Context,
-  Credentials,
   Draft,
   ExceptionItem,
   Report,
@@ -19,13 +18,15 @@ import type {
   WorkspaceMember,
 } from './types'
 
-let credentials: Credentials = { service: '', reviewer: '', finance: '' }
+const localDevelopment = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+const credentials = {
+  service: localDevelopment ? 'local-service-change-me' : '',
+  reviewer: localDevelopment ? 'local-reviewer-change-me' : '',
+  finance: localDevelopment ? 'local-finance-change-me' : '',
+}
 let accessToken = ''
 let workspaceId = ''
 const backendOrigin = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
-export function setCredentials(value: Credentials) {
-  credentials = value
-}
 export function setAuthContext(token: string, selectedWorkspace = '') {
   accessToken = token
   workspaceId = selectedWorkspace
@@ -132,6 +133,8 @@ export const api = {
     }),
   runs: () => request<Run[]>('/runs?limit=100'),
   batches: () => request<Batch[]>('/imports?limit=100'),
+  deleteBatch: (id: string) =>
+    request<{ id: string; deleted: boolean }>(`/imports/${id}`, { method: 'DELETE' }),
   run: (id: string) => request<Run>(`/runs/${id}`),
   results: (id: string) => request<Check[]>(`/runs/${id}/results`),
   exceptions: (id: string) => request<ExceptionItem[]>(`/runs/${id}/exceptions`),

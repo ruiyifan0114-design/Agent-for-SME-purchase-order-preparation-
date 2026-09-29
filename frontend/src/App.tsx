@@ -23,12 +23,12 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { api, setAuthContext, setCredentials } from './api'
+import { api, setAuthContext } from './api'
 import { cloudAuthEnabled, supabase } from './auth'
 import AgentPanel from './AgentPanel'
 import type { EditableDataset } from './DatasetEditor'
 import { Badge, Button, ErrorNotice, Evidence, Loading, Modal, shortId } from './components'
-import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
+import { CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
 import { PublicExperience, type WorkspaceUser } from './PublicExperience'
 import { WorkspaceManager } from './WorkspaceManager'
 import {
@@ -50,7 +50,6 @@ import type {
   Check,
   Cockpit,
   Context,
-  Credentials,
   Draft,
   ExceptionItem,
   Line,
@@ -75,23 +74,10 @@ type Dialog =
   | { kind: 'edit'; draft: Draft; line: Line }
   | { kind: 'review'; draft: Draft; reject: boolean; finance?: boolean }
   | { kind: 'history'; draft: Draft; events: ApprovalEvent[] }
-  | { kind: 'connection' }
+  | { kind: 'delete-batch'; batch: Batch; error?: string }
   | { kind: 'account' }
   | { kind: 'help' }
   | { kind: 'workspace' }
-function initialCredentials(): Credentials {
-  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
-  const defaults = {
-    service: local ? 'local-service-change-me' : '',
-    reviewer: local ? 'local-reviewer-change-me' : '',
-    finance: local ? 'local-finance-change-me' : '',
-  }
-  try {
-    return { ...defaults, ...JSON.parse(sessionStorage.getItem('supplydesk-access') || '{}') }
-  } catch {
-    return defaults
-  }
-}
 function initialScreen(): Screen {
   const hash = location.hash.slice(1)
   return navigation.some((n) => n.id === hash) ? (hash as Screen) : 'dashboard'
@@ -106,8 +92,7 @@ function WorkspaceApp({
   accessToken: string
   onSignOut: () => void
 }) {
-  const [credentials, saveCredentials] = useState(initialCredentials),
-    [screen, setScreen] = useState<Screen>(initialScreen),
+  const [screen, setScreen] = useState<Screen>(initialScreen),
     [mobileMenu, setMobileMenu] = useState(false)
   const [runs, setRuns] = useState<Run[]>([]),
     [batches, setBatches] = useState<Batch[]>([]),
@@ -130,7 +115,6 @@ function WorkspaceApp({
   const generation = useRef(0),
     auditOffset = useRef(0),
     currentId = useRef('')
-  setCredentials(credentials)
   setAuthContext(accessToken, workspaceId)
   const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) || null
   const closeDialog = useCallback(() => setDialog(null), [])
@@ -168,7 +152,7 @@ function WorkspaceApp({
       setError(e instanceof Error ? e.message : 'Unable to load workspace access')
       setWorkspaceReady(true)
     })
-  }, [reloadWorkspaces, credentials])
+  }, [reloadWorkspaces])
   const loadRun = useCallback(async (id: string) => {
     const seq = ++generation.current
     setLoading(true)
@@ -375,6 +359,22 @@ function WorkspaceApp({
       )
       openRun(batch)
     })
+  }
+  async function deleteBatch(batch: Batch) {
+    try {
+      await execute('', async () => {
+        await api.deleteBatch(batch.id)
+        setBatches(await api.batches())
+        setDialog(null)
+        notify(`${batch.filename} was deleted.`)
+      })
+    } catch (e) {
+      setDialog({
+        kind: 'delete-batch',
+        batch,
+        error: e instanceof Error ? e.message : 'Unable to delete this import.',
+      })
+    }
   }
   async function saveCorrection(context: Context, reason: string) {
     if (dialog?.kind !== 'correction' || !run) return
@@ -632,14 +632,7 @@ function WorkspaceApp({
           </button>
         </div>
         <main>
-          {error && (
-            <div className="global-error">
-              <ErrorNotice message={error} onRetry={() => void bootstrap()} />
-              <button className="text-link" onClick={() => setDialog({ kind: 'connection' })}>
-                Connection settings
-              </button>
-            </div>
-          )}
+          {error && <ErrorNotice message={error} onRetry={() => void bootstrap()} />}
           {busy && (
             <div className="working" role="status">
               <RefreshCw size={14} className="spin" /> Waiting for backend confirmation…
@@ -671,6 +664,7 @@ function WorkspaceApp({
                   onDemo={(s) => void loadDemo(s).catch(() => {})}
                   onRun={(b) => openRun(b)}
                   onCreate={createDataset}
+                  onDelete={(batch) => setDialog({ kind: 'delete-batch', batch })}
                 />
               )}
               {screen === 'skus' && (
@@ -858,21 +852,31 @@ function WorkspaceApp({
           </div>
         </Modal>
       )}
-      {dialog?.kind === 'connection' && !cloudAuthEnabled && (
-        <ConnectionForm
-          value={credentials}
+      {dialog?.kind === 'delete-batch' && (
+        <Modal
+          title="Delete this import?"
+          subtitle={`${dialog.batch.filename} · ${shortId(dialog.batch.id)}`}
           onClose={closeDialog}
-          onSave={(v) => {
-            sessionStorage.setItem('supplydesk-access', JSON.stringify(v))
-            saveCredentials(v)
-            closeDialog()
-          }}
-        />
+        >
+          <div className="modal-body">
+            {dialog.error && <ErrorNotice message={dialog.error} />}
+            <p>
+              This removes the uploaded dataset and its source rows. Imports already used by a
+              procurement review cannot be deleted because they are part of the audit record.
+            </p>
+            <div className="modal-actions">
+              <Button kind="secondary" onClick={closeDialog}>Cancel</Button>
+              <Button kind="danger" disabled={busy} onClick={() => void deleteBatch(dialog.batch)}>
+                Delete import
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
       {dialog?.kind === 'account' && (
         <Modal
           title="Account"
-          subtitle={cloudAuthEnabled ? 'Authenticated account and workspace membership' : 'Local display profile and workspace connection'}
+          subtitle={cloudAuthEnabled ? 'Authenticated account and workspace membership' : 'Automatic local development access'}
           onClose={closeDialog}
         >
           <div className="modal-body account-panel">
@@ -894,18 +898,13 @@ function WorkspaceApp({
               </div>
               <div>
                 <dt>Access</dt>
-                <dd>{cloudAuthEnabled ? 'Supabase session and workspace RBAC' : 'Backend API credentials'}</dd>
+                <dd>{cloudAuthEnabled ? 'Supabase session and workspace RBAC' : 'Automatic local backend connection'}</dd>
               </div>
             </dl>
             <div className="modal-actions account-actions">
               <Button kind="secondary" onClick={() => setDialog({ kind: 'workspace' })}>
                 <Settings2 size={15} /> Manage workspace
               </Button>
-              {!cloudAuthEnabled && (
-                <Button kind="secondary" onClick={() => setDialog({ kind: 'connection' })}>
-                  <Settings2 size={15} /> Connection settings
-                </Button>
-              )}
               <Button kind="secondary" onClick={onSignOut}>
                 <LogOut size={15} /> Sign out
               </Button>
@@ -1023,7 +1022,6 @@ export default function App() {
   const signOut = () => {
     if (cloudAuthEnabled && supabase) void supabase.auth.signOut()
     sessionStorage.removeItem('supplydesk-user')
-    sessionStorage.removeItem('supplydesk-access')
     sessionStorage.removeItem('supplydesk-run')
     setUser(null)
     setWorkspace(false)

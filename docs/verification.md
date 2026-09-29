@@ -6,7 +6,7 @@ Updated 2026-09-28. Dataset and business values are synthetic.
 | --- | --- |
 | Python | CPython 3.12.13, project-local virtual environment |
 | PostgreSQL | 16.15, isolated WSL instance on localhost:55432 |
-| Full test suite | **87 passed** (1 PostgreSQL concurrency test skipped on SQLite), including workspace isolation, membership enforcement, configurable thresholds and manager role isolation |
+| Full test suite | **88 passed** (1 PostgreSQL concurrency test skipped on SQLite), including workspace isolation, membership enforcement, protected import deletion, configurable thresholds and manager role isolation |
 | SQLite tests | **84 passed**, PostgreSQL-only row-lock test skipped |
 | Static checks | `ruff check backend tests migrations agent.py` passed |
 | Alembic | SQLite upgrade → downgrade → upgrade passed; existing PostgreSQL demo upgrade and schema check passed |

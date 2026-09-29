@@ -214,6 +214,11 @@ def import_status(batch_id: str, t=Depends(tools)):
     return ok(t.validate_import(batch_id))
 
 
+@router.delete("/imports/{batch_id}", response_model=Envelope)
+def delete_import(batch_id: str, t=Depends(write_tools)):
+    return ok(t.delete_import(batch_id))
+
+
 @router.post("/runs", response_model=Envelope, status_code=201)
 def create_run(request: RunRequest, t=Depends(write_tools)):
     return ok(t.create_procurement_run(request))

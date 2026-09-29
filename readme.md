@@ -12,6 +12,8 @@ The project targets one of the most time-consuming and error-prone parts of dail
 
 Use **Data intake → Build dataset manually** to add goods, suppliers, commercial terms, inventory, demand and incoming orders directly in the browser. Records can be edited, duplicated or deleted. **Validate & create batch** saves the data and opens review-policy confirmation. **Edit as new batch** revises an earlier import while preserving its original evidence and approvals. The Agent reads the selected run created from this batch.
 
+Selected upload files can be removed before validation. An unused or rejected import can also be deleted from Import history. Once an import has been used by a procurement review, it is retained as immutable audit evidence and the API explains why deletion is blocked.
+
 The system supports six CSV files, an Excel workbook with six worksheets, or JSON data covering:
 
 - SKU master data and safety stock policies

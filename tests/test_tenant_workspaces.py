@@ -59,6 +59,7 @@ def test_workspace_membership_claim_and_role_enforcement(db, data):
         assert listed.json()["data"][0]["role"] == "viewer"
         assert owner_client.get("/api/v1/imports", headers=headers).status_code == 200
         assert owner_client.post("/api/v1/imports", headers=headers, json=data).status_code == 403
+        assert owner_client.delete("/api/v1/imports/any", headers=headers).status_code == 403
     finally:
         app.dependency_overrides.clear()
 

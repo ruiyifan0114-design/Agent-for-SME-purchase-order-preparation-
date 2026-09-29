@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Truck,
   UploadCloud,
 } from 'lucide-react'
@@ -593,6 +594,7 @@ export function DataScreen({
   onDemo,
   onRun,
   onCreate,
+  onDelete,
 }: {
   batches: Batch[]
   busy: boolean
@@ -600,6 +602,7 @@ export function DataScreen({
   onDemo: (s: string) => void
   onRun: (batch: Batch) => void
   onCreate: (dataset: EditableDataset, filename: string) => Promise<void>
+  onDelete: (batch: Batch) => void
 }) {
   const input = useRef<HTMLInputElement>(null),
     [files, setFiles] = useState<File[]>([]),
@@ -696,12 +699,22 @@ export function DataScreen({
         {!!files.length && (
           <div className="selected-files">
             {files.map((f, i) => (
-              <span key={i}>
+              <span key={`${f.name}-${f.lastModified}-${i}`}>
                 <FileSpreadsheet size={15} />
                 {f.name}
                 <small>{(f.size / 1024).toFixed(1)} KB</small>
+                <button
+                  type="button"
+                  aria-label={`Remove selected file ${f.name}`}
+                  onClick={() => setFiles((current) => current.filter((_, index) => index !== i))}
+                >
+                  <Trash2 size={13} />
+                </button>
               </span>
             ))}
+            <Button kind="ghost" disabled={busy} onClick={() => setFiles([])}>
+              Clear selection
+            </Button>
             <Button
               disabled={busy}
               onClick={() =>
@@ -794,6 +807,9 @@ export function DataScreen({
                       disabled={busy}
                     >
                       <Pencil size={15} /> Edit as new batch
+                    </Button>
+                    <Button kind="danger" onClick={() => onDelete(b)} disabled={busy}>
+                      <Trash2 size={15} /> Delete import
                     </Button>
                     {b.status.startsWith('VALIDATED') && (
                       <Button kind="secondary" onClick={() => onRun(b)} disabled={busy}>
