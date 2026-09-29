@@ -1,13 +1,13 @@
 # Verification record
 
-Updated 2026-09-28. Dataset and business values are synthetic.
+Updated 2026-09-29. Dataset and business values are synthetic.
 
 | Check | Result |
 | --- | --- |
 | Python | CPython 3.12.13, project-local virtual environment |
 | PostgreSQL | 16.15, isolated WSL instance on localhost:55432 |
-| Full test suite | **88 passed** (1 PostgreSQL concurrency test skipped on SQLite), including workspace isolation, membership enforcement, protected import deletion, configurable thresholds and manager role isolation |
-| SQLite tests | **84 passed**, PostgreSQL-only row-lock test skipped |
+| Full test suite | **89 passed** (1 PostgreSQL concurrency test skipped on SQLite), including workspace isolation, membership enforcement, protected import/workspace deletion, configurable thresholds and manager role isolation |
+| SQLite tests | **89 passed**, PostgreSQL-only row-lock test skipped |
 | Static checks | `ruff check backend tests migrations agent.py` passed |
 | Alembic | SQLite upgrade → downgrade → upgrade passed; existing PostgreSQL demo upgrade and schema check passed |
 | Supabase | Project database upgraded through `8d34fa21c670`; procurement tables remain inaccessible directly to `anon`/`authenticated`; FastAPI validates Supabase Auth JWTs and workspace membership |
@@ -18,11 +18,11 @@ Updated 2026-09-28. Dataset and business values are synthetic.
 | Demo run | 10 processed / 6 REORDER / 1 NO_REORDER / 3 BLOCKED |
 | Docker image | Configuration supplied; build not executed because local Docker engine was unavailable |
 | Frontend production build | TypeScript check and Vite build passed |
-| Browser workflows | **13 workflows**, including manual data entry → SGD 5,000 PO → Purchasing approval → Finance approval → export, immutable batch editing, duplication/deletion, chat navigation/history, all previous procurement workflows and mobile layout |
-| Visual inspection | Desktop 1440px and mobile 390px screenshots inspected; mobile overflow check passed |
+| Browser workflows | **14 workflows**, including workspace edit/delete/API settings, manual data entry → SGD 5,000 PO → Purchasing approval → Finance approval → export, immutable batch editing, duplication/deletion, chat navigation/history and mobile layout |
+| Visual inspection | Desktop 1440px and mobile 390px screenshots inspected; workspace modal and mobile overflow checks passed |
 | DeepSeek provider | Tool loop, failure handling, private-reasoning isolation and free-form routing tested with mocks; real provider smoke test completed in the preceding chatbot upgrade |
 
-Backend tests create/drop their own tables and require a PostgreSQL database name ending `_test`. This revision's browser tests use an isolated `.runtime` SQLite database and production assets on port 8010. Chat-provider responses are mocked in the navigation/history browser test. No external orders are sent. Hosted identity comes from Supabase Auth and authorization comes from workspace memberships stored by FastAPI.
+Backend tests create/drop their own tables and require a PostgreSQL database name ending `_test`. This revision's browser tests use an isolated `.runtime` SQLite database and production assets. Chat-provider responses are mocked in the navigation/history browser test. No external orders are sent. Hosted identity comes from Supabase Auth and authorization comes from workspace memberships stored by FastAPI.
 
 There is one upstream Starlette TestClient deprecation warning about its httpx adapter; tests currently pass. No warning is suppressed.
 

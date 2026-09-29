@@ -2,7 +2,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from backend.agent.procurement import ProcurementAgent
 from backend.agent.messages import MessageRequest
 from backend.api.dependencies import (
@@ -15,7 +15,9 @@ from backend.domain.schemas import (
     LineEdit, MemberInvite, MemberUpdate, Resolution, Review, RunRequest,
     SimulationRequest, WorkspaceCreate, WorkspaceUpdate,
 )
-from backend.models.entities import Organization, Workspace, WorkspaceMembership
+from backend.models.entities import (
+    ImportBatch, Organization, ToolExecutionLog, Workspace, WorkspaceMembership,
+)
 from backend.skills.workflows import Approval, ExceptionResolution
 from backend.tools.runtime import BusinessError, serial
 
@@ -125,6 +127,30 @@ def update_workspace(workspace_id: str, request: WorkspaceUpdate, db=Depends(get
         WorkspaceMembership.user_id == identity["user_id"],
     ))
     return ok(workspace_payload(db, membership))
+
+
+@router.delete("/workspaces/{workspace_id}", response_model=Envelope)
+def delete_workspace(workspace_id: str, db=Depends(get_session),
+                     identity=Depends(workspace_identity)):
+    _owner(identity)
+    workspace = _selected_workspace(db, workspace_id, identity)
+    if db.scalar(select(ImportBatch.id).where(ImportBatch.workspace_id == workspace_id).limit(1)):
+        raise BusinessError(
+            "This workspace contains procurement data and must be retained for audit history",
+            "WORKSPACE_IN_USE",
+            409,
+        )
+    organization_id = workspace.org_id
+    db.execute(delete(ToolExecutionLog).where(ToolExecutionLog.workspace_id == workspace_id))
+    db.execute(delete(WorkspaceMembership).where(WorkspaceMembership.workspace_id == workspace_id))
+    db.delete(workspace)
+    db.flush()
+    if not db.scalar(select(Workspace.id).where(Workspace.org_id == organization_id).limit(1)):
+        organization = db.get(Organization, organization_id)
+        if organization:
+            db.delete(organization)
+    db.commit()
+    return ok({"id": workspace_id, "deleted": True})
 
 
 @router.get("/workspaces/{workspace_id}/members", response_model=Envelope)

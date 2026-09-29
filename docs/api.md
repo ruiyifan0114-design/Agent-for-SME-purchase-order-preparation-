@@ -10,6 +10,7 @@ Validation errors add `details` with field locations. CSV export returns a downl
 | GET | `/workspaces` | List only the signed-in user's workspace memberships |
 | POST | `/workspaces` | Create an organization/workspace and become its owner |
 | PATCH | `/workspaces/{id}` | Owner updates business entity, warehouse, currency or approval threshold |
+| DELETE | `/workspaces/{id}` | Owner deletes an empty workspace; procurement history blocks deletion |
 | GET | `/workspaces/{id}/members` | Owner lists workspace members |
 | POST | `/workspaces/{id}/members` | Owner invites a member by email and assigns a role |
 | PATCH | `/workspaces/{id}/members/{member_id}` | Owner changes a member's profile or role |

@@ -6,6 +6,7 @@ import type {
   Batch,
   Check as Result,
   Context,
+  Credentials,
   Draft,
   ExceptionItem,
   Line,
@@ -569,6 +570,82 @@ export function ReviewForm({
             {state.busy && <Loader2 className="spin" size={16} />}Confirm{' '}
             {reject ? 'rejection' : 'approval'}
           </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+export function ConnectionForm({
+  value,
+  onSave,
+  onClose,
+}: {
+  value: Credentials
+  onSave: (value: Credentials) => void
+  onClose: () => void
+}) {
+  const [form, setForm] = useState(value)
+  return (
+    <Modal
+      title="API connection"
+      subtitle="Optional compatibility settings for administrators and local deployments."
+      onClose={onClose}
+    >
+      <form
+        className="modal-body"
+        onSubmit={(event) => {
+          event.preventDefault()
+          onSave(form)
+        }}
+      >
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={form.useApiKeys}
+            onChange={(event) => setForm({ ...form, useApiKeys: event.target.checked })}
+          />
+          Use API keys instead of the signed-in Supabase account
+        </label>
+        <Field label="Service access key">
+          <input
+            required={form.useApiKeys}
+            disabled={!form.useApiKeys}
+            type="password"
+            autoComplete="off"
+            value={form.service}
+            onChange={(event) => setForm({ ...form, service: event.target.value })}
+          />
+        </Field>
+        <Field label="Purchasing Manager access key">
+          <input
+            required={form.useApiKeys}
+            disabled={!form.useApiKeys}
+            type="password"
+            autoComplete="off"
+            value={form.reviewer}
+            onChange={(event) => setForm({ ...form, reviewer: event.target.value })}
+          />
+        </Field>
+        <Field label="Finance Manager access key">
+          <input
+            required={form.useApiKeys}
+            disabled={!form.useApiKeys}
+            type="password"
+            autoComplete="off"
+            value={form.finance}
+            onChange={(event) => setForm({ ...form, finance: event.target.value })}
+          />
+        </Field>
+        <p className="notice soft">
+          Supabase remains the automatic and recommended connection. API-key mode works only when
+          the backend administrator explicitly enables legacy keys.
+        </p>
+        <div className="modal-actions">
+          <Button kind="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit">Save connection</Button>
         </div>
       </form>
     </Modal>

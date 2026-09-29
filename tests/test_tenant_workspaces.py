@@ -60,6 +60,7 @@ def test_workspace_membership_claim_and_role_enforcement(db, data):
         assert owner_client.get("/api/v1/imports", headers=headers).status_code == 200
         assert owner_client.post("/api/v1/imports", headers=headers, json=data).status_code == 403
         assert owner_client.delete("/api/v1/imports/any", headers=headers).status_code == 403
+        assert owner_client.delete(f"/api/v1/workspaces/{workspace['id']}", headers=headers).status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -104,3 +105,22 @@ def test_workspace_owns_its_approval_policy(db):
 
     assert tools._requires_finance(SimpleNamespace(currency="USD", total=Decimal("1000")))
     assert not tools._requires_finance(SimpleNamespace(currency="SGD", total=Decimal("9000")))
+
+
+def test_owner_can_delete_empty_workspace_but_not_procurement_history(db, data):
+    client = client_for(db, user())
+    try:
+        empty = create_workspace(client, "Empty")
+        headers = {"X-Workspace-ID": empty["id"]}
+        removed = client.delete(f"/api/v1/workspaces/{empty['id']}", headers=headers)
+        assert removed.status_code == 200
+        assert removed.json()["data"]["deleted"] is True
+
+        used = create_workspace(client, "Used")
+        headers = {"X-Workspace-ID": used["id"]}
+        assert client.post("/api/v1/imports", headers=headers, json=data).status_code == 201
+        blocked = client.delete(f"/api/v1/workspaces/{used['id']}", headers=headers)
+        assert blocked.status_code == 409
+        assert blocked.json()["error"]["code"] == "WORKSPACE_IN_USE"
+    finally:
+        app.dependency_overrides.clear()

@@ -206,7 +206,9 @@ The hosted application uses Supabase Auth. FastAPI verifies each bearer token ag
 | Finance | Read access plus finance approval or rejection when a draft reaches finance review. |
 | Viewer | Read-only access to workspace procurement records and Agent evidence. |
 
-Every import, run, SKU result, exception, PO draft, approval event and audit entry is resolved through its owning workspace. Each workspace also owns its business entity, warehouse, currency and finance-review threshold. Email invitations become active only for an authenticated user with the same verified email address.
+Every import, run, SKU result, exception, PO draft, approval event and audit entry is resolved through its owning workspace. Each workspace also owns its business entity, warehouse, currency and finance-review threshold. Owners can edit those settings and delete an empty workspace; workspaces containing procurement history remain protected. Email invitations become active only for an authenticated user with the same verified email address.
+
+Hosted users connect automatically through Supabase Auth. The Account panel retains editable API-key compatibility settings for local or legacy deployments, but the public backend keeps that mode disabled unless an administrator explicitly enables `ALLOW_API_KEYS`; provider secrets never enter the frontend bundle.
 
 Local development can enable legacy `X-API-Key` credentials with `ALLOW_API_KEYS=true`; the hosted Render configuration disables them. DeepSeek reads `DEEPSEEK_API_KEY` or the Git-ignored `deepseek_api_key.txt` on the backend only. After updating an existing installation, run `uv run alembic upgrade head` before restarting the server.
 

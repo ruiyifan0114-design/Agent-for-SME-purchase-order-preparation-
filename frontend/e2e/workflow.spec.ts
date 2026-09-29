@@ -49,9 +49,7 @@ test('landing and local profile have functional controls without fake authentica
   await page.getByRole('button', { name: 'Continue to workspace', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
   await page.getByRole('button', { name: /Switch workspace: Synthetic Office Co\./ }).click()
-  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toContainText(
-    'Main warehouse',
-  )
+  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toContainText('Main warehouse')
   await page.getByRole('button', { name: 'Close dialog' }).click()
   await page.getByRole('button', { name: 'Open account' }).click()
   const account = page.getByRole('dialog', { name: 'Account' })
@@ -61,6 +59,86 @@ test('landing and local profile have functional controls without fake authentica
   await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
   await page.getByRole('button', { name: 'Set up profile' }).click()
   await expect(page.getByRole('heading', { name: 'Start with Supplydesk' })).toBeVisible()
+})
+
+test('workspace administration fits the viewport and supports edit, delete and API settings', async ({
+  page,
+}) => {
+  let exists = true
+  let name = 'Operations'
+  const workspace = () => ({
+    id: 'ws-owner',
+    organization_id: 'org-owner',
+    organization_name: 'Acme',
+    name,
+    business_entity: 'Acme Singapore',
+    warehouse: 'SG-WH-1',
+    currency: 'SGD',
+    finance_threshold: '5000.00',
+    role: 'owner',
+  })
+  await page.route('**/api/v1/workspaces', async (route) => {
+    if (route.request().method() === 'GET')
+      await route.fulfill({ json: { data: exists ? [workspace()] : [] } })
+    else await route.continue()
+  })
+  await page.route('**/api/v1/workspaces/ws-owner', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      name = route.request().postDataJSON().name
+      await route.fulfill({ json: { data: workspace() } })
+    } else if (route.request().method() === 'DELETE') {
+      exists = false
+      await route.fulfill({ json: { data: { id: 'ws-owner', deleted: true } } })
+    } else await route.continue()
+  })
+  await page.route('**/api/v1/workspaces/ws-owner/members', (route) =>
+    route.fulfill({
+      json: {
+        data: [
+          {
+            id: 'member-owner',
+            workspace_id: 'ws-owner',
+            user_id: 'u1',
+            email: 'owner@acme.test',
+            display_name: 'Owner',
+            role: 'owner',
+            created_at: new Date().toISOString(),
+          },
+        ],
+      },
+    }),
+  )
+
+  await page.goto('/#dashboard')
+  await page.getByRole('button', { name: 'Open account' }).click()
+  await page.getByRole('button', { name: 'API connection' }).click()
+  const connection = page.getByRole('dialog', { name: 'API connection' })
+  await expect(connection.getByRole('checkbox')).toBeChecked()
+  await expect(connection.getByLabel('Service access key')).toBeEnabled()
+  await connection.getByRole('checkbox').uncheck()
+  await expect(connection.getByLabel('Service access key')).toBeDisabled()
+  await connection.getByRole('checkbox').check()
+  await expect(connection.getByLabel('Service access key')).toBeEnabled()
+  await connection.getByRole('button', { name: 'Cancel' }).click()
+
+  await page.getByRole('button', { name: /Switch workspace: Acme Singapore/ }).click()
+  const modal = page.getByRole('dialog', { name: 'Workspaces' })
+  await expect(modal.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+  expect(
+    await modal.evaluate((node) => ({
+      x: node.scrollWidth - node.clientWidth,
+      y: node.scrollHeight - node.clientHeight,
+    })),
+  ).toEqual({ x: 0, y: 0 })
+  await page.screenshot({ path: 'test-results/workspace-administration.png', fullPage: true })
+
+  await modal.getByRole('button', { name: 'Edit', exact: true }).click()
+  await modal.getByLabel('Name', { exact: true }).fill('Regional operations')
+  await modal.getByRole('button', { name: 'Save changes' }).click()
+  await expect(modal.getByRole('heading', { name: 'Regional operations' })).toBeVisible()
+  await modal.getByRole('button', { name: 'Delete', exact: true }).click()
+  await modal.getByRole('button', { name: 'Delete workspace' }).click()
+  await expect(modal.getByRole('heading', { name: 'Create a business workspace' })).toBeVisible()
 })
 
 test('decision cockpit compares reviews, simulates policy and grounds the daily brief', async ({
@@ -365,7 +443,9 @@ test('JSON filename survives intake and rejected datasets stay visible', async (
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(demo.dataset)),
   })
-  await page.getByRole('button', { name: 'Remove selected file invalid-duplicate-master.json' }).click()
+  await page
+    .getByRole('button', { name: 'Remove selected file invalid-duplicate-master.json' })
+    .click()
   await expect(page.getByRole('button', { name: 'Upload & validate' })).toHaveCount(0)
   await page.getByLabel('Upload source files').setInputFiles({
     name: 'invalid-duplicate-master.json',

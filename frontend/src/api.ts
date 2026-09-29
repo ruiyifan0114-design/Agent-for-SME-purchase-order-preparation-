@@ -7,6 +7,7 @@ import type {
   Check,
   Cockpit,
   Context,
+  Credentials,
   Draft,
   ExceptionItem,
   Report,
@@ -19,10 +20,11 @@ import type {
 } from './types'
 
 const localDevelopment = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
-const credentials = {
+let credentials: Credentials = {
   service: localDevelopment ? 'local-service-change-me' : '',
   reviewer: localDevelopment ? 'local-reviewer-change-me' : '',
   finance: localDevelopment ? 'local-finance-change-me' : '',
+  useApiKeys: localDevelopment,
 }
 let accessToken = ''
 let workspaceId = ''
@@ -30,6 +32,9 @@ const backendOrigin = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, 
 export function setAuthContext(token: string, selectedWorkspace = '') {
   accessToken = token
   workspaceId = selectedWorkspace
+}
+export function setCredentials(value: Credentials) {
+  credentials = value
 }
 export class ApiError extends Error {
   constructor(
@@ -54,11 +59,15 @@ async function request<T>(
     )
   }
   const headers = new Headers(options.headers)
-  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  if (accessToken && !credentials.useApiKeys) headers.set('Authorization', `Bearer ${accessToken}`)
   else
     headers.set(
       'X-API-Key',
-      human === 'finance' ? credentials.finance : human ? credentials.reviewer : credentials.service,
+      human === 'finance'
+        ? credentials.finance
+        : human
+          ? credentials.reviewer
+          : credentials.service,
     )
   if (workspaceId) headers.set('X-Workspace-ID', workspaceId)
   if (options.body && !(options.body instanceof FormData))
@@ -119,6 +128,8 @@ export const api = {
         finance_threshold: workspace.finance_threshold,
       }),
     }),
+  deleteWorkspace: (id: string) =>
+    request<{ id: string; deleted: boolean }>(`/workspaces/${id}`, { method: 'DELETE' }),
   members: (id: string) => request<WorkspaceMember[]>(`/workspaces/${id}/members`),
   inviteMember: (id: string, input: { email: string; display_name: string; role: string }) =>
     post<WorkspaceMember>(`/workspaces/${id}/members`, input),

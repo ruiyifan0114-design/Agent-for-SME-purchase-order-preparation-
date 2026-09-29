@@ -23,12 +23,12 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { api, setAuthContext } from './api'
+import { api, setAuthContext, setCredentials } from './api'
 import { cloudAuthEnabled, supabase } from './auth'
 import AgentPanel from './AgentPanel'
 import type { EditableDataset } from './DatasetEditor'
 import { Badge, Button, ErrorNotice, Evidence, Loading, Modal, shortId } from './components'
-import { CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
+import { ConnectionForm, CorrectionForm, EditLineForm, ReviewForm, RunForm } from './forms'
 import { PublicExperience, type WorkspaceUser } from './PublicExperience'
 import { WorkspaceManager } from './WorkspaceManager'
 import {
@@ -50,6 +50,7 @@ import type {
   Check,
   Cockpit,
   Context,
+  Credentials,
   Draft,
   ExceptionItem,
   Line,
@@ -75,9 +76,24 @@ type Dialog =
   | { kind: 'review'; draft: Draft; reject: boolean; finance?: boolean }
   | { kind: 'history'; draft: Draft; events: ApprovalEvent[] }
   | { kind: 'delete-batch'; batch: Batch; error?: string }
+  | { kind: 'connection' }
   | { kind: 'account' }
   | { kind: 'help' }
   | { kind: 'workspace' }
+function initialCredentials(): Credentials {
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+  const defaults: Credentials = {
+    service: local ? 'local-service-change-me' : '',
+    reviewer: local ? 'local-reviewer-change-me' : '',
+    finance: local ? 'local-finance-change-me' : '',
+    useApiKeys: local,
+  }
+  try {
+    return { ...defaults, ...JSON.parse(sessionStorage.getItem('supplydesk-access') || '{}') }
+  } catch {
+    return defaults
+  }
+}
 function initialScreen(): Screen {
   const hash = location.hash.slice(1)
   return navigation.some((n) => n.id === hash) ? (hash as Screen) : 'dashboard'
@@ -92,7 +108,8 @@ function WorkspaceApp({
   accessToken: string
   onSignOut: () => void
 }) {
-  const [screen, setScreen] = useState<Screen>(initialScreen),
+  const [credentials, saveCredentials] = useState(initialCredentials),
+    [screen, setScreen] = useState<Screen>(initialScreen),
     [mobileMenu, setMobileMenu] = useState(false)
   const [runs, setRuns] = useState<Run[]>([]),
     [batches, setBatches] = useState<Batch[]>([]),
@@ -115,6 +132,7 @@ function WorkspaceApp({
   const generation = useRef(0),
     auditOffset = useRef(0),
     currentId = useRef('')
+  setCredentials(credentials)
   setAuthContext(accessToken, workspaceId)
   const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId) || null
   const closeDialog = useCallback(() => setDialog(null), [])
@@ -134,25 +152,30 @@ function WorkspaceApp({
     window.addEventListener('hashchange', fn)
     return () => window.removeEventListener('hashchange', fn)
   }, [])
-  const reloadWorkspaces = useCallback(async (preferred?: string) => {
-    setAuthContext(accessToken, '')
-    const available = await api.workspaces()
-    const saved = sessionStorage.getItem('supplydesk-workspace')
-    const selected = available.find((workspace) => workspace.id === (preferred || saved)) || available[0]
-    setWorkspaces(available)
-    setWorkspaceId(selected?.id || '')
-    if (selected) sessionStorage.setItem('supplydesk-workspace', selected.id)
-    setAuthContext(accessToken, selected?.id || '')
-    setWorkspaceReady(true)
-    if (!selected) setDialog({ kind: 'workspace' })
-  }, [accessToken])
+  const reloadWorkspaces = useCallback(
+    async (preferred?: string) => {
+      setAuthContext(accessToken, '')
+      const available = await api.workspaces()
+      const saved = sessionStorage.getItem('supplydesk-workspace')
+      const selected =
+        available.find((workspace) => workspace.id === (preferred || saved)) || available[0]
+      setWorkspaces(available)
+      setWorkspaceId(selected?.id || '')
+      if (selected) sessionStorage.setItem('supplydesk-workspace', selected.id)
+      else sessionStorage.removeItem('supplydesk-workspace')
+      setAuthContext(accessToken, selected?.id || '')
+      setWorkspaceReady(true)
+      if (!selected) setDialog({ kind: 'workspace' })
+    },
+    [accessToken],
+  )
   useEffect(() => {
     setWorkspaceReady(false)
     void reloadWorkspaces().catch((e) => {
       setError(e instanceof Error ? e.message : 'Unable to load workspace access')
       setWorkspaceReady(true)
     })
-  }, [reloadWorkspaces])
+  }, [reloadWorkspaces, credentials])
   const loadRun = useCallback(async (id: string) => {
     const seq = ++generation.current
     setLoading(true)
@@ -496,10 +519,16 @@ function WorkspaceApp({
           aria-label={`Switch workspace${activeWorkspace ? `: ${activeWorkspace.business_entity}, ${activeWorkspace.warehouse}` : ''}`}
           onClick={() => setDialog({ kind: 'workspace' })}
         >
-          <span className="workspace-avatar">{activeWorkspace?.business_entity[0]?.toUpperCase() || 'W'}</span>
+          <span className="workspace-avatar">
+            {activeWorkspace?.business_entity[0]?.toUpperCase() || 'W'}
+          </span>
           <span>
             {activeWorkspace?.business_entity || 'Set up workspace'}
-            <small>{activeWorkspace ? `${activeWorkspace.warehouse} · ${activeWorkspace.role}` : 'No workspace access'}</small>
+            <small>
+              {activeWorkspace
+                ? `${activeWorkspace.warehouse} · ${activeWorkspace.role}`
+                : 'No workspace access'}
+            </small>
           </span>
           <ChevronDown size={14} />
         </button>
@@ -632,7 +661,14 @@ function WorkspaceApp({
           </button>
         </div>
         <main>
-          {error && <ErrorNotice message={error} onRetry={() => void bootstrap()} />}
+          {error && (
+            <div className="global-error">
+              <ErrorNotice message={error} onRetry={() => void bootstrap()} />
+              <button className="text-link" onClick={() => setDialog({ kind: 'connection' })}>
+                API connection
+              </button>
+            </div>
+          )}
           {busy && (
             <div className="working" role="status">
               <RefreshCw size={14} className="spin" /> Waiting for backend confirmation…
@@ -837,6 +873,8 @@ function WorkspaceApp({
         <Modal
           title="Workspaces"
           subtitle="Switch business entities and warehouses, or manage access."
+          wide
+          className="workspace-modal"
           onClose={workspaces.length ? closeDialog : onSignOut}
         >
           <div className="modal-body">
@@ -865,7 +903,9 @@ function WorkspaceApp({
               procurement review cannot be deleted because they are part of the audit record.
             </p>
             <div className="modal-actions">
-              <Button kind="secondary" onClick={closeDialog}>Cancel</Button>
+              <Button kind="secondary" onClick={closeDialog}>
+                Cancel
+              </Button>
               <Button kind="danger" disabled={busy} onClick={() => void deleteBatch(dialog.batch)}>
                 Delete import
               </Button>
@@ -873,10 +913,25 @@ function WorkspaceApp({
           </div>
         </Modal>
       )}
+      {dialog?.kind === 'connection' && (
+        <ConnectionForm
+          value={credentials}
+          onClose={closeDialog}
+          onSave={(value) => {
+            sessionStorage.setItem('supplydesk-access', JSON.stringify(value))
+            saveCredentials(value)
+            closeDialog()
+          }}
+        />
+      )}
       {dialog?.kind === 'account' && (
         <Modal
           title="Account"
-          subtitle={cloudAuthEnabled ? 'Authenticated account and workspace membership' : 'Automatic local development access'}
+          subtitle={
+            cloudAuthEnabled
+              ? 'Authenticated account and workspace membership'
+              : 'Automatic local development access'
+          }
           onClose={closeDialog}
         >
           <div className="modal-body account-panel">
@@ -894,16 +949,27 @@ function WorkspaceApp({
               </div>
               <div>
                 <dt>Workspace</dt>
-                <dd>{activeWorkspace ? `${activeWorkspace.business_entity} · ${activeWorkspace.warehouse}` : 'No workspace'}</dd>
+                <dd>
+                  {activeWorkspace
+                    ? `${activeWorkspace.business_entity} · ${activeWorkspace.warehouse}`
+                    : 'No workspace'}
+                </dd>
               </div>
               <div>
                 <dt>Access</dt>
-                <dd>{cloudAuthEnabled ? 'Supabase session and workspace RBAC' : 'Automatic local backend connection'}</dd>
+                <dd>
+                  {cloudAuthEnabled
+                    ? 'Supabase session and workspace RBAC'
+                    : 'Automatic local backend connection'}
+                </dd>
               </div>
             </dl>
             <div className="modal-actions account-actions">
               <Button kind="secondary" onClick={() => setDialog({ kind: 'workspace' })}>
                 <Settings2 size={15} /> Manage workspace
+              </Button>
+              <Button kind="secondary" onClick={() => setDialog({ kind: 'connection' })}>
+                <Settings2 size={15} /> API connection
               </Button>
               <Button kind="secondary" onClick={onSignOut}>
                 <LogOut size={15} /> Sign out
@@ -978,8 +1044,12 @@ function savedUser(): WorkspaceUser | null {
 
 export default function App() {
   const directWorkspace = navigation.some((item) => location.hash.slice(1) === item.id)
-  const [user, setUser] = useState<WorkspaceUser | null>(() => cloudAuthEnabled ? null : savedUser())
-  const [workspace, setWorkspace] = useState(() => !cloudAuthEnabled && (directWorkspace || Boolean(savedUser())))
+  const [user, setUser] = useState<WorkspaceUser | null>(() =>
+    cloudAuthEnabled ? null : savedUser(),
+  )
+  const [workspace, setWorkspace] = useState(
+    () => !cloudAuthEnabled && (directWorkspace || Boolean(savedUser())),
+  )
   const [accessToken, setAccessToken] = useState('')
   const [authReady, setAuthReady] = useState(!cloudAuthEnabled)
 
@@ -995,17 +1065,25 @@ export default function App() {
         return
       }
       const metadata = session.user.user_metadata || {}
-      const name = String(metadata.full_name || metadata.name || session.user.email?.split('@')[0] || 'Member')
+      const name = String(
+        metadata.full_name || metadata.name || session.user.email?.split('@')[0] || 'Member',
+      )
       setAccessToken(session.access_token)
       setUser({
         name,
         email: session.user.email || '',
         role: 'Workspace member',
-        initials: name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'WM',
+        initials:
+          name
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((part) => part[0]?.toUpperCase())
+            .join('') || 'WM',
       })
       setWorkspace(true)
       setAuthReady(true)
-      if (!navigation.some((item) => location.hash.slice(1) === item.id)) location.hash = 'dashboard'
+      if (!navigation.some((item) => location.hash.slice(1) === item.id))
+        location.hash = 'dashboard'
     }
     void client.auth.getSession().then(({ data }) => applySession(data.session))
     const { data } = client.auth.onAuthStateChange((_event, session) => applySession(session))
@@ -1022,13 +1100,19 @@ export default function App() {
   const signOut = () => {
     if (cloudAuthEnabled && supabase) void supabase.auth.signOut()
     sessionStorage.removeItem('supplydesk-user')
+    sessionStorage.removeItem('supplydesk-access')
     sessionStorage.removeItem('supplydesk-run')
     setUser(null)
     setWorkspace(false)
     history.replaceState(null, '', location.pathname)
   }
 
-  if (!authReady) return <div className="app-loading"><Loading /></div>
+  if (!authReady)
+    return (
+      <div className="app-loading">
+        <Loading />
+      </div>
+    )
   return workspace ? (
     <WorkspaceApp user={user || demoUser} accessToken={accessToken} onSignOut={signOut} />
   ) : (

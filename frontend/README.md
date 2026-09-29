@@ -18,7 +18,7 @@ For a single-origin preview, run `npm run build`, then start or restart FastAPI.
 
 ## Credentials
 
-The hosted frontend connects automatically after Supabase sign-in; users never enter backend access keys. Local development uses the explicit demo credentials from `.env.example`. DeepSeek credentials are read only by the backend from `DEEPSEEK_API_KEY` or the ignored root `deepseek_api_key.txt`.
+The hosted frontend connects automatically after Supabase sign-in. An optional **API connection** panel remains available under Account for administrators and legacy deployments; keys are editable, masked, and kept only in the current browser tab. API-key mode requires the backend administrator to enable `ALLOW_API_KEYS`. Local development starts with the explicit demo credentials from `.env.example`. DeepSeek credentials are read only by the backend from `DEEPSEEK_API_KEY` or the ignored root `deepseek_api_key.txt`.
 
 ## Demo walkthrough
 

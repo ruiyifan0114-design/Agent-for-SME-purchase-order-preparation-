@@ -257,6 +257,13 @@ export interface Simulation {
   changes: DecisionChange[]
   disclaimer: string
 }
+export interface Credentials {
+  service: string
+  reviewer: string
+  finance: string
+  useApiKeys: boolean
+}
+
 export type WorkspaceRole = 'owner' | 'procurement' | 'purchasing' | 'finance' | 'viewer'
 export interface Workspace {
   id: string
