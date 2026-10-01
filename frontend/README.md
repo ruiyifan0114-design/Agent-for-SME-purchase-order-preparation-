@@ -1,6 +1,6 @@
 # Procurement workspace frontend
 
-React + TypeScript + Vite, connected to FastAPI. Includes a product landing page, an explicitly local demo profile, and a hover-expand enterprise workspace shell. Profile fields are saved for the current tab; there is no password collection or simulated account authentication.
+React + TypeScript + Vite, connected to FastAPI. Includes a product landing page, Supabase business login/registration, persistent username/password Demo accounts, and a hover-expand enterprise workspace shell. Demo registration requires no email, phone or verification; passwords are hashed by the backend and never stored in the browser.
 
 ## Start
 

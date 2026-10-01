@@ -53,6 +53,22 @@ class WorkspaceMembership(Identity, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class DemoAccount(Identity, Base):
+    __tablename__ = "demo_account"
+    username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(32))
+    password_hash: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class DemoSession(Identity, Base):
+    __tablename__ = "demo_session"
+    account_id: Mapped[str] = mapped_column(ForeignKey("demo_account.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class ImportBatch(Identity, Base):
     __tablename__ = "import_batch"
     workspace_id: Mapped[str] = mapped_column(

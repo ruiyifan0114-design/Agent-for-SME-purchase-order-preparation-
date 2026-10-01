@@ -36,29 +36,49 @@ async function approve(page: Page, supplier: string) {
   return card
 }
 
-test('landing and local profile have functional controls without fake authentication', async ({
-  page,
-}) => {
+test('landing offers login plus normal and persistent demo registration', async ({ page }) => {
+  const username = `buyer_${Date.now()}`
+  const password = 'demo-password-2026'
   await page.goto('/')
   await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
   await expect(page.getByText('PROCUREMENT INTELLIGENCE, WITH CONTROL')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Login', exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign up', exact: true }).first()).toBeVisible()
   await page.screenshot({ path: 'test-results/landing-desktop.png', fullPage: true })
-  await page.getByRole('button', { name: 'Demo access', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
-  await expect(page.getByLabel('Password')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Continue to workspace', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
-  await page.getByRole('button', { name: /Switch workspace: Synthetic Office Co\./ }).click()
-  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toContainText('Main warehouse')
+  await page.getByRole('button', { name: 'Sign up', exact: true }).first().click()
+  await expect(page.getByRole('heading', { name: 'Sign up for Supplydesk' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Normal registration' })).toBeVisible()
+  await expect(page.getByLabel('Full name')).toBeVisible()
+  await expect(page.getByLabel('Business email')).toBeVisible()
+  await page.getByRole('tab', { name: 'Demo registration' }).click()
+  await expect(page.getByLabel('Business email')).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/demo-registration.png', fullPage: true })
+  await page.getByLabel('Username').fill(username)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create demo account' }).click()
+  const workspace = page.getByRole('dialog', { name: 'Workspaces' })
+  await expect(
+    workspace.getByRole('heading', { name: 'Create a business workspace' }),
+  ).toBeVisible()
+  await workspace.getByLabel('Organization').fill('Demo Company')
+  await workspace.getByLabel('Workspace name').fill('Demo Workspace')
+  await workspace.getByLabel('Business entity').fill('Demo Company Singapore')
+  await workspace.getByLabel('Warehouse').fill('Demo Warehouse')
+  await workspace.locator('form').getByRole('button', { name: 'Create workspace' }).click()
   await page.getByRole('button', { name: 'Close dialog' }).click()
+  await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
   await page.getByRole('button', { name: 'Open account' }).click()
   const account = page.getByRole('dialog', { name: 'Account' })
-  await expect(account).toContainText('Reviewer')
-  await expect(account).toContainText('service')
+  await expect(account).toContainText(username)
+  await expect(account).toContainText('Demo account session')
   await account.getByRole('button', { name: 'Sign out' }).click()
   await expect(page.getByRole('heading', { name: /From fragmented data/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Set up profile' }).click()
-  await expect(page.getByRole('heading', { name: 'Start with Supplydesk' })).toBeVisible()
+  await page.getByRole('button', { name: 'Login', exact: true }).first().click()
+  await page.getByRole('tab', { name: 'Demo account' }).click()
+  await page.getByLabel('Username').fill(username)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
 })
 
 test('workspace administration fits the viewport and supports edit, delete and API settings', async ({
@@ -374,7 +394,7 @@ test('responsive layout and keyboard dialog close on mobile', async ({ page }) =
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).toBeTruthy()
-  await page.getByRole('button', { name: 'Enter dashboard' }).click()
+  await page.goto('/?mobile=1#dashboard')
   await expect(page.getByRole('heading', { name: 'A clear view. A better order.' })).toBeVisible()
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

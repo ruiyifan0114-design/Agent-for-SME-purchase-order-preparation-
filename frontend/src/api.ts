@@ -108,6 +108,19 @@ const post = <T>(path: string, body?: unknown, human: boolean | 'finance' = fals
     human,
   )
 export const api = {
+  demoRegister: (input: { username: string; password: string }) =>
+    post<{
+      access_token: string
+      expires_at: string
+      user: { name: string; email: string; role: string; initials: string }
+    }>('/auth/demo/register', input),
+  demoLogin: (input: { username: string; password: string }) =>
+    post<{
+      access_token: string
+      expires_at: string
+      user: { name: string; email: string; role: string; initials: string }
+    }>('/auth/demo/login', input),
+  demoLogout: () => request<{ signed_out: boolean }>('/auth/demo/session', { method: 'DELETE' }),
   workspaces: () => request<Workspace[]>('/workspaces'),
   createWorkspace: (input: {
     organization_name: string

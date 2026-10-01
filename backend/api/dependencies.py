@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, select
 
 from backend.config import settings
 from backend.db.session import get_session
+from backend.auth.demo import authenticate_demo_token
 from backend.models.entities import LEGACY_WORKSPACE_ID, WorkspaceMembership
 from backend.tools.procurement import ProcurementTools
 from backend.tools.runtime import BusinessError
@@ -19,14 +20,18 @@ def _jwks_client(url: str) -> PyJWKClient:
 
 
 def authenticated_user(
+    db=Depends(get_session),
     authorization: str = Header(default=""),
     x_api_key: str = Header(default=""),
 ):
     cfg = settings()
     if authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
+        demo_identity = authenticate_demo_token(db, token)
+        if demo_identity:
+            return demo_identity
         if not cfg.supabase_url:
             raise BusinessError("Supabase authentication is not configured", "CONFIGURATION_ERROR", 503)
-        token = authorization[7:].strip()
         try:
             signing_key = _jwks_client(cfg.supabase_url).get_signing_key_from_jwt(token)
             claims = jwt.decode(

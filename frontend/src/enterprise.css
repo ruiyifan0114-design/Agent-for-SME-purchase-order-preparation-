@@ -1635,10 +1635,33 @@ label {
   margin-top: 8px;
   color: #667085;
 }
+.auth-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 22px;
+  padding: 4px;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  background: #f4f6f8;
+}
+.auth-methods button {
+  min-height: 36px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: #667085;
+  font-size: 10px;
+  font-weight: 650;
+}
+.auth-methods button.active {
+  background: #fff;
+  color: #183451;
+  box-shadow: 0 1px 4px rgba(18, 38, 63, 0.12);
+}
 .auth-card form {
   display: grid;
   gap: 17px;
-  margin-top: 28px;
+  margin-top: 20px;
 }
 .auth-card form > label {
   display: grid;

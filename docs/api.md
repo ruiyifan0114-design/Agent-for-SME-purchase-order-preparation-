@@ -1,6 +1,12 @@
 # Frontend API contract
 
-Base: `/api/v1`. Hosted clients send `Authorization: Bearer <Supabase access token>`. Workspace-scoped routes also send an authorized `X-Workspace-ID`. Local-only legacy clients may use `X-API-Key` when `ALLOW_API_KEYS=true`. `/docs` provides the request schemas.
+Base: `/api/v1`. Hosted clients send `Authorization: Bearer <token>` using either a Supabase access token or a backend Demo session token. Workspace-scoped routes also send an authorized `X-Workspace-ID`. Local-only legacy clients may use `X-API-Key` when `ALLOW_API_KEYS=true`. `/docs` provides the request schemas.
+
+| Method | Authentication route | Purpose |
+| --- | --- | --- |
+| POST | `/auth/demo/register` | Create a username/password Demo account without email or verification |
+| POST | `/auth/demo/login` | Start a seven-day Demo account session |
+| DELETE | `/auth/demo/session` | Revoke the current Demo session |
 Dates use ISO strings, timestamps include timezone, money is serialized as decimal **strings**.
 Success: `{"data": ...}`. Errors: `{"error":{"code":"...","message":"..."}}`.
 Validation errors add `details` with field locations. CSV export returns a download response.
@@ -80,7 +86,7 @@ At least one of quantity/unit_price is required. MOQ and pack constraints still 
 {"expected_version":4,"confirm":true,"comment":"Reviewed price, quantities, and lead-time warnings"}
 ```
 
-Every mutation changes the relevant version/revision. On `409 VERSION_CONFLICT`, refresh and review the new data. `401` means the Supabase token is missing, expired or invalid. `403 WORKSPACE_ACCESS_DENIED` means the user is not a member of the selected workspace; other 403 responses identify a missing workspace role. `409 APPROVAL_REQUIRED` and `409 FINANCE_APPROVAL_REQUIRED` prevent final export. `409 PO_AMOUNT_MISMATCH` blocks corrupted amounts. Critical edits clear both approvals.
+Every mutation changes the relevant version/revision. On `409 VERSION_CONFLICT`, refresh and review the new data. `401` means the Supabase or Demo token is missing, expired or invalid. `403 WORKSPACE_ACCESS_DENIED` means the user is not a member of the selected workspace; other 403 responses identify a missing workspace role. `409 APPROVAL_REQUIRED` and `409 FINANCE_APPROVAL_REQUIRED` prevent final export. `409 PO_AMOUNT_MISMATCH` blocks corrupted amounts. Critical edits clear both approvals.
 
 ## State semantics
 

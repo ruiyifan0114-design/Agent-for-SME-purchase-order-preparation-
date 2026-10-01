@@ -14,6 +14,11 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class DemoCredentials(StrictModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    password: str = Field(min_length=8, max_length=128)
+
+
 class WorkspaceCreate(StrictModel):
     organization_name: str = Field(min_length=2, max_length=200)
     name: str = Field(min_length=2, max_length=200)

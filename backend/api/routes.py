@@ -1,8 +1,12 @@
 from typing import Any
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select
+from backend.auth.demo import (
+    authenticate_demo_token, issue_session, password_hash, password_matches,
+    remove_expired_sessions, token_digest,
+)
 from backend.agent.procurement import ProcurementAgent
 from backend.agent.messages import MessageRequest
 from backend.api.dependencies import (
@@ -12,11 +16,12 @@ from backend.api.dependencies import (
 from backend.db.session import get_session
 from backend.domain.intake import MAX_BYTES
 from backend.domain.schemas import (
-    LineEdit, MemberInvite, MemberUpdate, Resolution, Review, RunRequest,
+    DemoCredentials, LineEdit, MemberInvite, MemberUpdate, Resolution, Review, RunRequest,
     SimulationRequest, WorkspaceCreate, WorkspaceUpdate,
 )
 from backend.models.entities import (
-    ImportBatch, Organization, ToolExecutionLog, Workspace, WorkspaceMembership,
+    DemoAccount, DemoSession, ImportBatch, Organization, ToolExecutionLog, Workspace,
+    WorkspaceMembership,
 )
 from backend.skills.workflows import Approval, ExceptionResolution
 from backend.tools.runtime import BusinessError, serial
@@ -31,6 +36,43 @@ router = APIRouter(prefix="/api/v1")
 
 def ok(data):
     return {"data": data}
+
+
+@router.post("/auth/demo/register", response_model=Envelope, status_code=201)
+def register_demo(request: DemoCredentials, db=Depends(get_session)):
+    username = request.username.lower()
+    if db.scalar(select(DemoAccount.id).where(DemoAccount.username == username)):
+        raise BusinessError("That demo username is already in use", "USERNAME_TAKEN", 409)
+    remove_expired_sessions(db)
+    account = DemoAccount(
+        username=username,
+        display_name=request.username,
+        password_hash=password_hash(request.password),
+    )
+    db.add(account)
+    db.flush()
+    return ok(issue_session(db, account))
+
+
+@router.post("/auth/demo/login", response_model=Envelope)
+def login_demo(request: DemoCredentials, db=Depends(get_session)):
+    account = db.scalar(
+        select(DemoAccount).where(DemoAccount.username == request.username.lower())
+    )
+    if account is None or not password_matches(request.password, account.password_hash):
+        raise BusinessError("Incorrect demo username or password", "INVALID_CREDENTIALS", 401)
+    remove_expired_sessions(db)
+    return ok(issue_session(db, account))
+
+
+@router.delete("/auth/demo/session", response_model=Envelope)
+def logout_demo(authorization: str = Header(default=""), db=Depends(get_session)):
+    token = authorization.removeprefix("Bearer ").strip()
+    if not authenticate_demo_token(db, token):
+        raise BusinessError("Valid demo authentication required", "UNAUTHORIZED", 401)
+    db.execute(delete(DemoSession).where(DemoSession.token_hash == token_digest(token)))
+    db.commit()
+    return ok({"signed_out": True})
 
 
 def workspace_payload(db, membership):
@@ -79,7 +121,7 @@ def workspaces(db=Depends(get_session), user=Depends(authenticated_user)):
 
 @router.post("/workspaces", response_model=Envelope, status_code=201)
 def create_workspace(request: WorkspaceCreate, db=Depends(get_session), user=Depends(authenticated_user)):
-    if user["auth_type"] != "jwt":
+    if user["auth_type"] not in {"jwt", "demo"}:
         raise BusinessError("A signed-in user is required", "FORBIDDEN", 403)
     organization = Organization(name=request.organization_name)
     db.add(organization)

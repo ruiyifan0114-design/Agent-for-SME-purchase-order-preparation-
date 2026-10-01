@@ -12,6 +12,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
+import { api } from './api'
 import { cloudAuthEnabled, supabase } from './auth'
 
 export interface WorkspaceUser {
@@ -52,11 +53,13 @@ function AuthPage({
 }: {
   view: Exclude<View, 'landing'>
   onView: (v: View) => void
-  onEnter: (u: WorkspaceUser) => void
+  onEnter: (u: WorkspaceUser, accessToken?: string) => void
 }) {
   const signup = view === 'signup'
+  const [method, setMethod] = useState<'business' | 'demo'>('business')
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('reviewer@supplydesk.demo')
+  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -64,30 +67,47 @@ function AuthPage({
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    setError('')
+    setNotice('')
+    if (method === 'demo') {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$/.test(username))
+        return setError('Use 3–32 letters, numbers, dots, hyphens or underscores.')
+      if (password.length < 8) return setError('Use at least 8 characters.')
+      setBusy(true)
+      try {
+        const session = signup
+          ? await api.demoRegister({ username, password })
+          : await api.demoLogin({ username, password })
+        onEnter(session.user, session.access_token)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Unable to access the demo account.')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (signup && name.trim().length < 2) return setError('Enter your full name.')
     if (!email.includes('@')) return setError('Enter a valid business email.')
-    if (cloudAuthEnabled && password.length < 8) return setError('Use at least 8 characters.')
+    if (password.length < 8) return setError('Use at least 8 characters.')
+    if (!cloudAuthEnabled || !supabase)
+      return setError('Business accounts require the hosted Supabase deployment.')
     const displayName = signup ? name.trim() : email.split('@')[0].replace(/[._-]/g, ' ')
-    if (cloudAuthEnabled && supabase) {
-      setBusy(true)
-      setError('')
-      setNotice('')
-      const result = signup
-          ? await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              data: { full_name: displayName },
-              emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
-            },
-          })
-        : await supabase.auth.signInWithPassword({ email, password })
-      setBusy(false)
-      if (result.error) return setError(result.error.message)
-      if (!result.data.session) {
-        setNotice('Check your email to confirm the account, then sign in.')
-        return
-      }
+    setBusy(true)
+    const result = signup
+      ? await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: displayName },
+            emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+          },
+        })
+      : await supabase.auth.signInWithPassword({ email, password })
+    setBusy(false)
+    if (result.error) return setError(result.error.message)
+    if (!result.data.session) {
+      setNotice('Check your email to confirm the account, then sign in.')
+      return
     }
     onEnter({
       name: displayName.replace(/\b\w/g, (letter) => letter.toUpperCase()),
@@ -135,16 +155,44 @@ function AuthPage({
             <LockKeyhole size={19} />
           </div>
           <span className="auth-overline">
-            {signup ? 'PERSONALIZE DEMO PROFILE' : 'LOCAL DEMO ACCESS'}
+            {signup ? 'CREATE YOUR ACCOUNT' : 'SECURE ACCOUNT ACCESS'}
           </span>
-          <h2 id="auth-title">{signup ? 'Start with Supplydesk' : 'Welcome back'}</h2>
+          <h2 id="auth-title">{signup ? 'Sign up for Supplydesk' : 'Welcome back'}</h2>
           <p>
             {signup
-              ? 'Set the display name for this browser tab.'
-              : 'Choose your display profile to enter the demo workspace.'}
+              ? 'Choose a verified business account or a fast demo account.'
+              : 'Sign in to your business or demo account.'}
           </p>
+          <div className="auth-methods" role="tablist" aria-label="Account type">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={method === 'business'}
+              className={method === 'business' ? 'active' : ''}
+              onClick={() => {
+                setMethod('business')
+                setError('')
+                setNotice('')
+              }}
+            >
+              {signup ? 'Normal registration' : 'Business account'}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={method === 'demo'}
+              className={method === 'demo' ? 'active' : ''}
+              onClick={() => {
+                setMethod('demo')
+                setError('')
+                setNotice('')
+              }}
+            >
+              {signup ? 'Demo registration' : 'Demo account'}
+            </button>
+          </div>
           <form onSubmit={submit}>
-            {signup && (
+            {method === 'business' && signup && (
               <label>
                 Full name
                 <input
@@ -155,28 +203,40 @@ function AuthPage({
                 />
               </label>
             )}
-            <label>
-              Business email
-              <input
-                autoFocus={!signup}
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@company.com"
-              />
-            </label>
-            {cloudAuthEnabled && (
+            {method === 'business' ? (
               <label>
-                Password
+                Business email
                 <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 8 characters"
-                  autoComplete={signup ? 'new-password' : 'current-password'}
+                  autoFocus={!signup}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  autoComplete="email"
+                />
+              </label>
+            ) : (
+              <label>
+                Username
+                <input
+                  autoFocus
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="procurement_demo"
+                  autoComplete="username"
                 />
               </label>
             )}
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                autoComplete={signup ? 'new-password' : 'current-password'}
+              />
+            </label>
             {error && (
               <p className="auth-error" role="alert">
                 {error}
@@ -187,30 +247,23 @@ function AuthPage({
               {busy
                 ? 'Please wait…'
                 : signup
-                  ? cloudAuthEnabled ? 'Create account' : 'Save profile'
-                  : cloudAuthEnabled ? 'Sign in' : 'Continue to workspace'}
+                  ? method === 'demo'
+                    ? 'Create demo account'
+                    : 'Create business account'
+                  : 'Sign in'}
               <ArrowRight size={16} />
             </button>
           </form>
-          {!cloudAuthEnabled && (
-            <>
-              <div className="auth-divider"><span>Demo access</span></div>
-              <button className="demo-access" onClick={() => onEnter({
-                name: 'Procurement Reviewer', email: 'reviewer@supplydesk.demo',
-                role: 'Procurement Manager', initials: 'PR',
-              })}>Enter demo workspace</button>
-            </>
-          )}
           <p className="auth-switch">
-            {signup ? 'Use a quick profile?' : 'Personalize your profile?'}{' '}
+            {signup ? 'Already have an account?' : 'New to Supplydesk?'}{' '}
             <button onClick={() => onView(signup ? 'login' : 'signup')}>
-              {signup ? 'Demo access' : 'Edit profile'}
+              {signup ? 'Log in' : 'Sign up'}
             </button>
           </p>
           <small className="auth-note">
-            {cloudAuthEnabled
-              ? 'Your account session is managed by Supabase. Workspace membership controls data and approval access.'
-              : 'Local demo profile. API permissions use the workspace connection settings.'}
+            {method === 'demo'
+              ? 'Demo registration needs no email, phone or verification. Demo accounts still receive an isolated workspace session.'
+              : 'Business account sessions and email verification are managed by Supabase.'}
           </small>
         </section>
       </div>
@@ -218,7 +271,11 @@ function AuthPage({
   )
 }
 
-export function PublicExperience({ onEnter }: { onEnter: (user: WorkspaceUser) => void }) {
+export function PublicExperience({
+  onEnter,
+}: {
+  onEnter: (user: WorkspaceUser, accessToken?: string) => void
+}) {
   const [view, setView] = useState<View>('landing')
   const [menu, setMenu] = useState(false)
   if (view !== 'landing') return <AuthPage view={view} onView={setView} onEnter={onEnter} />
@@ -239,9 +296,9 @@ export function PublicExperience({ onEnter }: { onEnter: (user: WorkspaceUser) =
           </a>
         </nav>
         <div className="landing-actions">
-          <button onClick={() => setView('login')}>{cloudAuthEnabled ? 'Sign in' : 'Demo access'}</button>
+          <button onClick={() => setView('login')}>Login</button>
           <button className="nav-cta" onClick={() => setView('signup')}>
-            {cloudAuthEnabled ? 'Create account' : 'Set up profile'} <ArrowRight size={14} />
+            Sign up <ArrowRight size={14} />
           </button>
         </div>
         <button className="landing-menu" aria-label="Toggle menu" onClick={() => setMenu(!menu)}>
@@ -265,17 +322,11 @@ export function PublicExperience({ onEnter }: { onEnter: (user: WorkspaceUser) =
               evaluate every SKU, resolve exceptions and approve purchase orders.
             </p>
             <div className="hero-actions">
-              <button
-                className="hero-primary"
-                onClick={() => cloudAuthEnabled ? setView('login') : onEnter({
-                  name: 'Procurement Reviewer', email: 'reviewer@supplydesk.demo',
-                  role: 'Procurement Manager', initials: 'PR',
-                })}
-              >
-                Enter dashboard <ArrowRight size={16} />
+              <button className="hero-primary" onClick={() => setView('login')}>
+                Login <ArrowRight size={16} />
               </button>
               <button className="hero-secondary" onClick={() => setView('signup')}>
-                Create workspace
+                Sign up
               </button>
             </div>
             <div className="hero-trust">

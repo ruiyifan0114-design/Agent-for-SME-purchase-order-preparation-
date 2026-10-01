@@ -108,7 +108,10 @@ function WorkspaceApp({
   accessToken: string
   onSignOut: () => void
 }) {
-  const [credentials, saveCredentials] = useState(initialCredentials),
+  const [credentials, saveCredentials] = useState(() => {
+      const initial = initialCredentials()
+      return accessToken.startsWith('demo_') ? { ...initial, useApiKeys: false } : initial
+    }),
     [screen, setScreen] = useState<Screen>(initialScreen),
     [mobileMenu, setMobileMenu] = useState(false)
   const [runs, setRuns] = useState<Run[]>([]),
@@ -928,9 +931,11 @@ function WorkspaceApp({
         <Modal
           title="Account"
           subtitle={
-            cloudAuthEnabled
-              ? 'Authenticated account and workspace membership'
-              : 'Automatic local development access'
+            accessToken.startsWith('demo_')
+              ? 'Demo account and workspace membership'
+              : cloudAuthEnabled
+                ? 'Authenticated account and workspace membership'
+                : 'Automatic local development access'
           }
           onClose={closeDialog}
         >
@@ -958,9 +963,11 @@ function WorkspaceApp({
               <div>
                 <dt>Access</dt>
                 <dd>
-                  {cloudAuthEnabled
-                    ? 'Supabase session and workspace RBAC'
-                    : 'Automatic local backend connection'}
+                  {accessToken.startsWith('demo_')
+                    ? 'Demo account session and workspace RBAC'
+                    : cloudAuthEnabled
+                      ? 'Supabase session and workspace RBAC'
+                      : 'Automatic local backend connection'}
                 </dd>
               </div>
             </dl>
@@ -1042,22 +1049,44 @@ function savedUser(): WorkspaceUser | null {
   }
 }
 
+interface SavedDemoSession {
+  user: WorkspaceUser
+  accessToken: string
+}
+
+function savedDemoSession(): SavedDemoSession | null {
+  try {
+    return JSON.parse(sessionStorage.getItem('supplydesk-demo-session') || 'null')
+  } catch {
+    return null
+  }
+}
+
 export default function App() {
   const directWorkspace = navigation.some((item) => location.hash.slice(1) === item.id)
-  const [user, setUser] = useState<WorkspaceUser | null>(() =>
-    cloudAuthEnabled ? null : savedUser(),
+  const storedDemo = savedDemoSession()
+  const [user, setUser] = useState<WorkspaceUser | null>(
+    () => storedDemo?.user || (cloudAuthEnabled ? null : savedUser()),
   )
   const [workspace, setWorkspace] = useState(
-    () => !cloudAuthEnabled && (directWorkspace || Boolean(savedUser())),
+    () => Boolean(storedDemo) || (!cloudAuthEnabled && (directWorkspace || Boolean(savedUser()))),
   )
-  const [accessToken, setAccessToken] = useState('')
-  const [authReady, setAuthReady] = useState(!cloudAuthEnabled)
+  const [accessToken, setAccessToken] = useState(storedDemo?.accessToken || '')
+  const [authReady, setAuthReady] = useState(Boolean(storedDemo) || !cloudAuthEnabled)
 
   useEffect(() => {
     const client = supabase
     if (!cloudAuthEnabled || !client) return
     const applySession = (session: Session | null) => {
       if (!session) {
+        const demo = savedDemoSession()
+        if (demo) {
+          setAccessToken(demo.accessToken)
+          setUser(demo.user)
+          setWorkspace(true)
+          setAuthReady(true)
+          return
+        }
         setAccessToken('')
         setUser(null)
         setWorkspace(false)
@@ -1065,6 +1094,7 @@ export default function App() {
         return
       }
       const metadata = session.user.user_metadata || {}
+      sessionStorage.removeItem('supplydesk-demo-session')
       const name = String(
         metadata.full_name || metadata.name || session.user.email?.split('@')[0] || 'Member',
       )
@@ -1090,18 +1120,27 @@ export default function App() {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  const enter = (next: WorkspaceUser = demoUser) => {
-    if (cloudAuthEnabled) return
-    sessionStorage.setItem('supplydesk-user', JSON.stringify(next))
+  const enter = (next: WorkspaceUser = demoUser, demoToken = '') => {
+    if (cloudAuthEnabled && !demoToken) return
+    if (demoToken) {
+      sessionStorage.setItem(
+        'supplydesk-demo-session',
+        JSON.stringify({ user: next, accessToken: demoToken }),
+      )
+      setAccessToken(demoToken)
+    } else sessionStorage.setItem('supplydesk-user', JSON.stringify(next))
     setUser(next)
     setWorkspace(true)
     if (!navigation.some((item) => location.hash.slice(1) === item.id)) location.hash = 'dashboard'
   }
   const signOut = () => {
+    if (accessToken.startsWith('demo_')) void api.demoLogout().catch(() => undefined)
     if (cloudAuthEnabled && supabase) void supabase.auth.signOut()
     sessionStorage.removeItem('supplydesk-user')
+    sessionStorage.removeItem('supplydesk-demo-session')
     sessionStorage.removeItem('supplydesk-access')
     sessionStorage.removeItem('supplydesk-run')
+    setAccessToken('')
     setUser(null)
     setWorkspace(false)
     history.replaceState(null, '', location.pathname)

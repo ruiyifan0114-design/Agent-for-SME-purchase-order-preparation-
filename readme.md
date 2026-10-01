@@ -196,7 +196,7 @@ The frontend also provides three ready-to-run demo scenarios: standard procureme
 
 ## Identity and Workspace Boundaries
 
-The hosted application uses Supabase Auth. FastAPI verifies each bearer token against the project's JWKS endpoint, then resolves the selected `X-Workspace-ID` against server-side membership records. The sidebar workspace switcher only lists organizations and warehouses that the signed-in user may access.
+The hosted application offers two account types. Business registration and login use Supabase Auth with email verification. Demo registration accepts only a username and password: FastAPI stores a PBKDF2-SHA256 salted password hash, stores only a hash of each random seven-day session token, and revokes that session at sign-out. Both account types resolve the selected `X-Workspace-ID` against the same server-side membership records, so the sidebar only lists organizations and warehouses that the signed-in user may access.
 
 | Workspace role | Permissions |
 | --- | --- |
