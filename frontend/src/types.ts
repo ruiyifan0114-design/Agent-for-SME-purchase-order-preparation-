@@ -223,6 +223,7 @@ export interface AgentReply {
   evidence_complete?: boolean
   unresolved?: string[]
   confirmation_required?: boolean
+  conversation_id?: string
 }
 
 export interface AgentEvidence {
@@ -245,6 +246,38 @@ export interface AgentProposal {
   created_by: string
   confirmed_by?: string | null
   created_at: string
+}
+
+export interface AgentConversation {
+  id: string
+  title: string
+  run_id?: string | null
+  message_count?: number
+  last_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  interaction_id?: string | null
+  message_metadata: {
+    provider?: string
+    tools_used?: string[]
+    evidence?: AgentEvidence[]
+    evidence_complete?: boolean
+    unresolved?: string[]
+  }
+  created_at: string
+}
+
+export interface AgentConversationDetail {
+  conversation: AgentConversation
+  messages: AgentChatMessage[]
+  has_more: boolean
+  oldest_message_id?: string | null
 }
 
 export interface ChatTurn {

@@ -4,6 +4,20 @@ The Agent is a single orchestration layer. Inventory, sourcing, pricing, landed 
 matching, PO changes and approvals remain deterministic backend services. PostgreSQL is
 the source of truth; each turn re-reads the selected run rather than trusting chat memory.
 
+## Persistent conversations
+
+Each signed-in user can maintain multiple chats inside a workspace. Conversation titles,
+messages and the last selected procurement run are stored in PostgreSQL. On every turn the
+backend loads the latest 12 saved messages for linguistic context; client-supplied history is
+ignored when a conversation ID is present. The full history remains inspectable in the UI,
+while the bounded model context controls token use. Chat ownership is enforced in the backend,
+and ordinary members can inspect or replay only their own Agent interactions. Workspace owners
+and administrators retain workspace-wide audit access.
+
+Conversation context may resolve references such as “that supplier” or “the previous option”,
+but it is not business truth. The Agent must still call authorized tools for current SKU, PO,
+supplier, price, approval and inventory facts.
+
 ## Security and evidence
 
 Every tool call is authorized by the backend role. Viewers receive operational status but

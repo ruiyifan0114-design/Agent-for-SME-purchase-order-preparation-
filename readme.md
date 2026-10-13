@@ -214,6 +214,11 @@ Every import, run, SKU result, exception, PO draft, approval event and audit ent
 
 Hosted users connect automatically through Supabase Auth. The Account panel retains editable API-key compatibility settings for local or legacy deployments, but the public backend keeps that mode disabled unless an administrator explicitly enables `ALLOW_API_KEYS`; provider secrets never enter the frontend bundle.
 
+The Procurement Agent supports multiple persistent chats per workspace user. It restores saved
+history after refresh and uses recent conversation turns for language context, while all current
+procurement facts are re-read through authorized backend tools. Conversations and ordinary Agent
+audit records are user-isolated; workspace owners and administrators retain broader audit access.
+
 Local development can explicitly enable legacy `X-API-Key` credentials with `ALLOW_API_KEYS=true`; the hosted Render configuration disables them. DeepSeek reads only the backend `DEEPSEEK_API_KEY` environment secret. After updating an existing installation, run `uv run alembic upgrade head` before restarting the server.
 
 ## Testing and Current Status
@@ -229,8 +234,8 @@ cd ..
 
 The current version has passed:
 
-- 132 backend and integration tests, including workspace isolation, rule snapshots, duplicate prevention, authorization, migration round trips, receipt/invoice matching, approval invalidation, Agent adversarial controls, proposal confirmation and worker execution
-- 15 isolated browser workflows including manual entry, editing, duplication/deletion, two-stage approval, PO lifecycle, partial receipt, invoice exceptions, export, chat navigation and mobile layout
+- 134 backend and integration tests, including workspace isolation, persistent multi-chat context, rule snapshots, duplicate prevention, authorization, migration round trips, receipt/invoice matching, approval invalidation, Agent adversarial controls, proposal confirmation and worker execution
+- 16 isolated browser workflows including manual entry, editing, duplication/deletion, two-stage approval, PO lifecycle, partial receipt, invoice exceptions, export, persistent multi-chat switching, chat navigation and mobile layout
 - TypeScript checks and Vite production build
 - Alembic upgrade, downgrade, re-upgrade, and schema drift checks
 - Visual checks at 1440px desktop and 390px mobile widths

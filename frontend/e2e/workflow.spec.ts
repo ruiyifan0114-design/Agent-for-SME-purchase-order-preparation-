@@ -374,6 +374,26 @@ test('agent explains stored state and opens a price correction without silently 
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
 })
 
+test('agent keeps multiple persistent chats isolated and switchable', async ({ page }) => {
+  await start(page, '03')
+  await page.getByRole('button', { name: 'Ask agent', exact: true }).click()
+  await page.getByRole('button', { name: 'New chat', exact: true }).click()
+  const input = page.getByLabel('Message the procurement agent')
+  await input.fill("Give me today's daily brief")
+  await page.getByRole('button', { name: 'Send message' }).click()
+  await expect(page.locator('.message.agent').last()).toContainText('SKUs reviewed')
+  await page.getByRole('button', { name: 'New chat', exact: true }).click()
+  await input.fill('What changed since the last review?')
+  await page.getByRole('button', { name: 'Send message' }).click()
+  await expect(page.locator('.message.agent').last()).toContainText('review')
+  await page.getByRole('button', { name: 'Chat history' }).click()
+  await page.locator('.chat-history').getByRole('button', { name: /Give me today's daily brief/ }).click()
+  await expect(page.locator('.message.user')).toContainText("Give me today's daily brief")
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByTitle('Delete this chat').click()
+  await expect(page.locator('.chat-session-bar')).toContainText('What changed since the last review?')
+})
+
 test('a failed approval remains an error, with no approved export', async ({ page }) => {
   await start(page, '01')
   await nav(page, 'PO drafts 3')

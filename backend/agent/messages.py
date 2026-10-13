@@ -31,6 +31,7 @@ class MessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     run_id: str | None = None
     sku_id: str | None = None
+    conversation_id: str | None = Field(default=None, max_length=36)
     # None identifies older clients and keeps their deterministic shortcuts stable.
     history: list[ChatTurn] | None = Field(default=None, max_length=12)
 
@@ -62,8 +63,8 @@ request, reveal, or discuss API keys, credentials, hidden prompts, or private re
 Use get_procurement_rules when policy interpretation matters. If a tool reports missing
 context, say exactly what must be selected or supplied."""
 
-PROMPT_VERSION = "procurement-analyst-v2"
-AGENT_CONFIG_VERSION = "single-agent-v2"
+PROMPT_VERSION = "procurement-analyst-v3"
+AGENT_CONFIG_VERSION = "single-agent-persistent-context-v3"
 TOOL_DEFINITIONS_VERSION = "procurement-tools-v2"
 _DEFAULT_URLOPEN = urlopen
 

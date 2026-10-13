@@ -1,5 +1,5 @@
 import type {
-  AgentProposal, AgentReply,
+  AgentConversation, AgentConversationDetail, AgentProposal, AgentReply,
   ChatTurn,
   ApprovalEvent,
   AuditEvent,
@@ -231,13 +231,23 @@ export const api = {
   matrixApprove: (draft: Draft, comment: string, finance: boolean) =>
     post<{ approved_step: { required_role: string } }>(`/drafts/${draft.id}/matrix-approve`,
       { expected_version: draft.version, comment, confirm: true }, finance ? 'finance' : true),
-  message: (message: string, run_id?: string, sku_id?: string, history: ChatTurn[] = []) =>
+  message: (message: string, run_id?: string, sku_id?: string, history: ChatTurn[] = [], conversation_id?: string) =>
     post<AgentReply>('/agent/message', {
       message,
       run_id: run_id || null,
       sku_id: sku_id || null,
+      conversation_id: conversation_id || null,
       history: history.slice(-10),
     }),
+  agentConversations: () => request<AgentConversation[]>('/agent/conversations?limit=100'),
+  createAgentConversation: (title = 'New procurement chat', run_id?: string) =>
+    post<AgentConversation>('/agent/conversations', { title, run_id: run_id || null }),
+  agentConversation: (id: string, before?: string) =>
+    request<AgentConversationDetail>(`/agent/conversations/${id}?limit=200${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+  renameAgentConversation: (id: string, title: string) =>
+    request<AgentConversation>(`/agent/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  deleteAgentConversation: (id: string) =>
+    request<{ id: string; deleted: boolean }>(`/agent/conversations/${id}`, { method: 'DELETE' }),
   agentInteractions: (limit = 50, offset = 0) =>
     request<unknown[]>(`/agent/interactions?limit=${limit}&offset=${offset}`),
   replayAgentInteraction: (id: string) => post<AgentReply>(`/agent/interactions/${id}/replay`),

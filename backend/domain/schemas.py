@@ -264,6 +264,15 @@ class AgentProposalConfirm(StrictModel):
     confirm: Literal[True]
 
 
+class AgentConversationCreate(StrictModel):
+    title: str = Field(default="New procurement chat", min_length=1, max_length=120)
+    run_id: str | None = Field(default=None, max_length=36)
+
+
+class AgentConversationUpdate(StrictModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
 class FinanceDimensionsRequest(StrictModel):
     cost_center: str | None = Field(default=None, max_length=80)
     project_code: str | None = Field(default=None, max_length=80)

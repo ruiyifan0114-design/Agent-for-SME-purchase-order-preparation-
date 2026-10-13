@@ -101,6 +101,8 @@ Import parsing errors return 422. Validly parsed but structurally invalid datase
 
 ## Agent operations
 
+- `GET/POST /api/v1/agent/conversations` lists or creates the signed-in user's workspace chats.
+- `GET/PATCH/DELETE /api/v1/agent/conversations/{id}` reads messages, renames a chat or deletes it.
 - `POST /api/v1/agent/message` runs the bounded, read-only Agent and returns evidence plus an `interaction_id`.
 - `GET /api/v1/agent/interactions` and `GET /api/v1/agent/interactions/{id}` inspect model, prompt/tool versions, validated calls, hashed result references and outcome.
 - `POST /api/v1/agent/interactions/{id}/replay` safely replays the question against current authoritative state; it never replays a historical write.
@@ -109,5 +111,10 @@ Import parsing errors return 422. Validly parsed but structurally invalid datase
 - `POST /api/v1/agent/proposals/{id}/execute` revalidates the target version and delegates to the deterministic PO or approval service.
 
 List tools are cursor-paginated with a maximum page size of 50 and always report `total`, `next_cursor` and `complete`. Viewer Agent calls cannot access spend, purchase-order details or simulation tools, and commercial fields returned by allowed tools are redacted by the backend.
+
+When `conversation_id` is supplied to `/agent/message`, the backend loads that user's latest 12
+saved turns and disregards the request's `history` field. This prevents a client from replacing
+the authoritative conversation context. Message history endpoints return up to 200 records per
+page and accept `before=<oldest_message_id>` for explicit continuation.
 
 Exports are saved as full immutable snapshots in approval/export history and returned as CSV; no filesystem path is supplied by the client. Draft GET provides a preview at any time. Export does not send orders, post inventory, or create live ERP transactions.

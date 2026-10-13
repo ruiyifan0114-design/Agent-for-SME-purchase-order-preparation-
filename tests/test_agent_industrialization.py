@@ -5,8 +5,9 @@ from sqlalchemy import select
 
 from backend.agent import messages
 from backend.agent.evaluation import evaluate
-from backend.domain.schemas import AgentProposalCreate
-from backend.models.entities import AgentInteraction, AgentProposal, PODraft, POLine
+from backend.domain.schemas import AgentConversationCreate, AgentProposalCreate
+from backend.models.entities import AgentChatMessage, AgentInteraction, AgentProposal, PODraft, POLine
+from backend.tools.procurement import ProcurementTools
 from backend.tools.runtime import BusinessError
 
 
@@ -84,3 +85,43 @@ def test_versioned_evaluation_dataset_passes_baseline():
     report = evaluate(__import__("pathlib").Path("evals/procurement_agent_v1.jsonl"))
     assert report["case_count"] == 8
     assert report["summary"]["passed"] == 1.0
+
+
+def test_multiple_chat_histories_are_persistent_and_contextual(monkeypatch, t, start):
+    run_id = start()
+    first = t.create_agent_conversation(AgentConversationCreate(title="Supplier review", run_id=run_id))
+    second = t.create_agent_conversation(AgentConversationCreate(title="Approval review", run_id=run_id))
+    seen = []
+
+    def answer(_tools, request, _key, _interaction):
+        seen.append([turn.content for turn in request.history or []])
+        return {"message": f"Context contains {len(request.history or [])} messages", "action": "NONE",
+                "provider": "test-model", "tools_used": []}
+
+    monkeypatch.setattr(messages, "_provider_key", lambda: "test-key")
+    monkeypatch.setattr(messages, "_deepseek_reply", answer)
+    t.agent_message(messages.MessageRequest(message="Compare supplier A", run_id=run_id,
+                                             conversation_id=first["id"], history=[]))
+    reply = t.agent_message(messages.MessageRequest(message="What about its lead time?", run_id=run_id,
+                                                     conversation_id=first["id"], history=[]))
+    t.agent_message(messages.MessageRequest(message="Explain approval threshold", run_id=run_id,
+                                             conversation_id=second["id"], history=[]))
+    assert seen[0] == []
+    assert seen[1] == ["Compare supplier A", "Context contains 0 messages"]
+    assert seen[2] == []
+    assert reply["conversation_id"] == first["id"]
+    detail = t.get_agent_conversation(first["id"])
+    assert [item["role"] for item in detail["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert detail["conversation"]["run_id"] == run_id
+
+
+def test_chat_history_is_user_isolated_and_deletable(db, t):
+    conversation = t.create_agent_conversation(AgentConversationCreate(title="Private analysis"))
+    other = ProcurementTools(db, actor="Another User", human=True, role="purchasing", user_id="user-2")
+    with pytest.raises(BusinessError) as exc:
+        other.get_agent_conversation(conversation["id"])
+    assert exc.value.code == "NOT_FOUND"
+    deleted = t.delete_agent_conversation(conversation["id"])
+    assert deleted["deleted"] is True
+    assert not list(db.scalars(select(AgentChatMessage).where(
+        AgentChatMessage.conversation_id == conversation["id"])))

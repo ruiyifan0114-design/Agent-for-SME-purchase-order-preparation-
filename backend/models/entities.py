@@ -408,6 +408,29 @@ class AgentProposal(Identity, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class AgentConversation(Identity, Base):
+    __tablename__ = "agent_conversation"
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(String(200), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("procurement_run.id"), index=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class AgentChatMessage(Identity, Base):
+    __tablename__ = "agent_chat_message"
+    __table_args__ = (UniqueConstraint("conversation_id", "sequence"),)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("agent_conversation.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str] = mapped_column(String(20))
+    content: Mapped[str] = mapped_column(Text)
+    interaction_id: Mapped[str | None] = mapped_column(ForeignKey("agent_interaction.id"), index=True)
+    message_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
 class JobRecord(Identity, Base):
     __tablename__ = "job_record"
     __table_args__ = (UniqueConstraint("workspace_id", "idempotency_key"),)

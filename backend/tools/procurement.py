@@ -6,18 +6,19 @@ from copy import deepcopy
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from backend.domain.engine import amount, evaluate
 from backend.domain.intake import normalize
 from backend.integrations.adapters import CSVAdapter, JSONAdapter, SourceEnvelope
-from backend.domain.schemas import (AgentProposalCreate, LineEdit, Resolution, Review, RuleSetCreate,
-                                    RunRequest, SimulationRequest)
+from backend.domain.schemas import (AgentConversationCreate, AgentConversationUpdate, AgentProposalCreate,
+                                    LineEdit, Resolution, Review, RuleSetCreate, RunRequest, SimulationRequest)
 from backend.models.entities import (ApprovalEvent, Demand, ExceptionRecord, ImportBatch, Inventory,
     LEGACY_WORKSPACE_ID, OpenPO, PODraft, POLine, ProcurementRun, SKU, SKUCheckResult,
     RuleSet, Supplier, SupplierSKU, ToolExecutionLog, Workspace, now, GoodsReceipt,
     GoodsReceiptLine, SupplierInvoice, SupplierInvoiceLine, MatchResult, SourcingDecision)
 from backend.models.entities import (SupplierPerformance, CommercialAgreement, SKUInventoryPolicy,
-    ApprovalMatrixRule, ApprovalDelegation, Budget, AgentInteraction, AgentProposal)
+    ApprovalMatrixRule, ApprovalDelegation, Budget, AgentChatMessage, AgentConversation,
+    AgentInteraction, AgentProposal)
 from backend.tools.runtime import BusinessError, audited, serial
 from backend.observability import increment
 from backend.domain.receiving.engine import apply_receipt, transition_po
@@ -35,8 +36,12 @@ class ProcurementTools:
         self.user_id, self.correlation_id = user_id, correlation_id
 
     def _resource_workspace(self, obj):
-        if isinstance(obj, (ImportBatch, ToolExecutionLog, RuleSet, AgentInteraction, AgentProposal)):
+        if isinstance(obj, (ImportBatch, ToolExecutionLog, RuleSet, AgentInteraction, AgentProposal,
+                            AgentConversation)):
             return obj.workspace_id
+        if isinstance(obj, AgentChatMessage):
+            conversation = self.db.get(AgentConversation, obj.conversation_id)
+            return conversation.workspace_id if conversation else None
         if isinstance(obj, (SKU, Supplier, SupplierSKU, Inventory, Demand, OpenPO)):
             batch = self.db.get(ImportBatch, obj.batch_id)
             return batch.workspace_id if batch else None
@@ -771,24 +776,132 @@ class ProcurementTools:
 
     @audited
     def agent_message(self, request):
-        from backend.agent.messages import reply
-        return reply(self, request)
+        from backend.agent.messages import ChatTurn, MessageRequest, reply
+        if not request.conversation_id:
+            return reply(self, request)
+        conversation = self._conversation(request.conversation_id, lock=True)
+        history_rows = list(self.db.scalars(select(AgentChatMessage).where(
+            AgentChatMessage.conversation_id == conversation.id
+        ).order_by(AgentChatMessage.sequence.desc()).limit(12)))
+        history = [ChatTurn(role=row.role, content=row.content[:4000]) for row in reversed(history_rows)]
+        effective = MessageRequest(message=request.message, run_id=request.run_id or conversation.run_id,
+                                   sku_id=request.sku_id, conversation_id=conversation.id, history=history)
+        result = reply(self, effective)
+        last_sequence = self.db.scalar(select(func.max(AgentChatMessage.sequence)).where(
+            AgentChatMessage.conversation_id == conversation.id)) or 0
+        self.db.add(AgentChatMessage(conversation_id=conversation.id, sequence=last_sequence + 1, role="user",
+                                    content=request.message, message_metadata={"run_id": effective.run_id}))
+        self.db.add(AgentChatMessage(
+            conversation_id=conversation.id, sequence=last_sequence + 2, role="assistant", content=result["message"],
+            interaction_id=result.get("interaction_id"),
+            message_metadata={key: serial(result.get(key)) for key in (
+                "provider", "tools_used", "evidence", "evidence_complete", "unresolved",
+                "confirmation_required", "action", "page", "sku_id") if result.get(key) is not None},
+        ))
+        if conversation.title == "New procurement chat":
+            conversation.title = request.message.strip()[:120]
+        if effective.run_id:
+            conversation.run_id = effective.run_id
+        conversation.updated_at = now()
+        result["conversation_id"] = conversation.id
+        return result
+
+    def _chat_owner(self):
+        return self.user_id or f"{self.role}:{self.actor}"
+
+    def _conversation(self, conversation_id, lock=False):
+        conversation = self._get(AgentConversation, conversation_id, lock=lock)
+        if conversation.owner_id != self._chat_owner():
+            raise BusinessError("Conversation not found", "NOT_FOUND", 404)
+        return conversation
+
+    @audited
+    def create_agent_conversation(self, request: AgentConversationCreate):
+        if request.run_id:
+            self._get(ProcurementRun, request.run_id)
+        conversation = AgentConversation(
+            workspace_id=self.workspace_id, owner_id=self._chat_owner(), title=request.title.strip(),
+            run_id=request.run_id, created_by=self.actor,
+        )
+        self.db.add(conversation)
+        self.db.flush()
+        return serial(conversation)
+
+    @audited
+    def list_agent_conversations(self, limit=50, offset=0):
+        rows = list(self.db.scalars(select(AgentConversation).where(
+            AgentConversation.workspace_id == self.workspace_id,
+            AgentConversation.owner_id == self._chat_owner(),
+        ).order_by(AgentConversation.updated_at.desc(), AgentConversation.id.desc()).offset(offset).limit(limit)))
+        output = []
+        for row in rows:
+            messages = list(self.db.scalars(select(AgentChatMessage).where(
+                AgentChatMessage.conversation_id == row.id
+            ).order_by(AgentChatMessage.sequence.desc()).limit(1)))
+            count = self.db.scalar(select(func.count()).select_from(AgentChatMessage).where(
+                AgentChatMessage.conversation_id == row.id)) or 0
+            data = serial(row)
+            data.update(message_count=count, last_message=messages[0].content[:160] if messages else "")
+            output.append(data)
+        return output
+
+    @audited
+    def get_agent_conversation(self, conversation_id, limit=200, before=None):
+        conversation = self._conversation(conversation_id)
+        query = select(AgentChatMessage).where(AgentChatMessage.conversation_id == conversation.id)
+        if before:
+            anchor = self._get(AgentChatMessage, before)
+            if anchor.conversation_id != conversation.id:
+                raise BusinessError("Message not found", "NOT_FOUND", 404)
+            query = query.where(AgentChatMessage.sequence < anchor.sequence)
+        rows = list(self.db.scalars(query.order_by(
+            AgentChatMessage.sequence.desc()).limit(limit + 1)))
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        rows.reverse()
+        return {"conversation": serial(conversation), "messages": [serial(row) for row in rows],
+                "has_more": has_more, "oldest_message_id": rows[0].id if rows else None}
+
+    @audited
+    def update_agent_conversation(self, conversation_id, request: AgentConversationUpdate):
+        conversation = self._conversation(conversation_id)
+        conversation.title = request.title.strip()
+        conversation.updated_at = now()
+        return serial(conversation)
+
+    @audited
+    def delete_agent_conversation(self, conversation_id):
+        conversation = self._conversation(conversation_id)
+        self.db.execute(delete(AgentChatMessage).where(AgentChatMessage.conversation_id == conversation.id))
+        self.db.delete(conversation)
+        return {"id": conversation_id, "deleted": True}
 
     @audited
     def list_agent_interactions(self, limit=50, offset=0):
-        rows = self.db.scalars(select(AgentInteraction).where(
-            AgentInteraction.workspace_id == self.workspace_id
-        ).order_by(AgentInteraction.started_at.desc()).offset(offset).limit(limit))
+        query = select(AgentInteraction).where(AgentInteraction.workspace_id == self.workspace_id)
+        if self.role not in {"owner", "admin"}:
+            query = query.where(AgentInteraction.user_id == self.user_id) if self.user_id else query.where(
+                AgentInteraction.actor == self.actor)
+        rows = self.db.scalars(query.order_by(
+            AgentInteraction.started_at.desc()).offset(offset).limit(limit))
         return [serial(row) for row in rows]
+
+    def _interaction(self, interaction_id):
+        interaction = self._get(AgentInteraction, interaction_id)
+        if self.role not in {"owner", "admin"}:
+            same_user = interaction.user_id == self.user_id if self.user_id else interaction.actor == self.actor
+            if not same_user:
+                raise BusinessError("Agent interaction not found", "NOT_FOUND", 404)
+        return interaction
 
     @audited
     def get_agent_interaction(self, interaction_id):
-        return serial(self._get(AgentInteraction, interaction_id))
+        return serial(self._interaction(interaction_id))
 
     @audited
     def replay_agent_interaction(self, interaction_id):
         from backend.agent.messages import MessageRequest, reply
-        original = self._get(AgentInteraction, interaction_id)
+        original = self._interaction(interaction_id)
         request = MessageRequest(**original.request)
         # Replay re-reads current authoritative state and exposes only read-only tools.
         return reply(self, request, replay_of_id=original.id)

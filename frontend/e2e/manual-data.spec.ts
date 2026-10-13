@@ -93,17 +93,17 @@ test('manually entered goods run through agent, purchasing and finance approval,
   expect((await original.json()).data.context.sku.description).toBe('Competition goods')
 })
 
-test('free chat sends conversation history, renders evidence and navigates to requested page', async ({
+test('free chat uses a persistent conversation, renders evidence and navigates to requested page', async ({
   page,
 }) => {
   await page.goto('/#dashboard')
   let calls = 0
+  let conversationId = ''
   await page.route('**/api/v1/agent/message', async (route) => {
     const body = route.request().postDataJSON()
-    if (calls++)
-      expect(
-        body.history.some((m: { content: string }) => m.content.includes('supplier spend')),
-      ).toBeTruthy()
+    if (!calls++) conversationId = body.conversation_id
+    else expect(body.conversation_id).toBe(conversationId)
+    expect(body.history).toEqual([])
     await route.fulfill({
       json: {
         data: {
