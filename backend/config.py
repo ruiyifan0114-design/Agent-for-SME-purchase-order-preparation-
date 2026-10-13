@@ -12,6 +12,16 @@ class Settings(BaseSettings):
     finance_reviewer_name: str = "Demo Finance Manager"
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-flash"
+    deepseek_fallback_model: str = ""
+    agent_timeout_seconds: int = 70
+    agent_model_attempts: int = 2
+    agent_circuit_failure_threshold: int = 3
+    agent_circuit_cooldown_seconds: int = 60
+    agent_max_tool_calls: int = 8
+    agent_token_budget: int = 20000
+    agent_cost_budget_usd: float = 0.25
+    deepseek_input_cost_per_million: float = 0.0
+    deepseek_output_cost_per_million: float = 0.0
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     supabase_url: str = ""
     supabase_audience: str = "authenticated"

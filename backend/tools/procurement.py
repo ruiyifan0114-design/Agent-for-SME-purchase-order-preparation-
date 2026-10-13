@@ -10,13 +10,14 @@ from sqlalchemy import delete, select
 from backend.domain.engine import amount, evaluate
 from backend.domain.intake import normalize
 from backend.integrations.adapters import CSVAdapter, JSONAdapter, SourceEnvelope
-from backend.domain.schemas import LineEdit, Resolution, Review, RuleSetCreate, RunRequest, SimulationRequest
+from backend.domain.schemas import (AgentProposalCreate, LineEdit, Resolution, Review, RuleSetCreate,
+                                    RunRequest, SimulationRequest)
 from backend.models.entities import (ApprovalEvent, Demand, ExceptionRecord, ImportBatch, Inventory,
     LEGACY_WORKSPACE_ID, OpenPO, PODraft, POLine, ProcurementRun, SKU, SKUCheckResult,
     RuleSet, Supplier, SupplierSKU, ToolExecutionLog, Workspace, now, GoodsReceipt,
     GoodsReceiptLine, SupplierInvoice, SupplierInvoiceLine, MatchResult, SourcingDecision)
 from backend.models.entities import (SupplierPerformance, CommercialAgreement, SKUInventoryPolicy,
-    ApprovalMatrixRule, ApprovalDelegation, Budget)
+    ApprovalMatrixRule, ApprovalDelegation, Budget, AgentInteraction, AgentProposal)
 from backend.tools.runtime import BusinessError, audited, serial
 from backend.observability import increment
 from backend.domain.receiving.engine import apply_receipt, transition_po
@@ -34,7 +35,7 @@ class ProcurementTools:
         self.user_id, self.correlation_id = user_id, correlation_id
 
     def _resource_workspace(self, obj):
-        if isinstance(obj, (ImportBatch, ToolExecutionLog, RuleSet)):
+        if isinstance(obj, (ImportBatch, ToolExecutionLog, RuleSet, AgentInteraction, AgentProposal)):
             return obj.workspace_id
         if isinstance(obj, (SKU, Supplier, SupplierSKU, Inventory, Demand, OpenPO)):
             batch = self.db.get(ImportBatch, obj.batch_id)
@@ -772,6 +773,102 @@ class ProcurementTools:
     def agent_message(self, request):
         from backend.agent.messages import reply
         return reply(self, request)
+
+    @audited
+    def list_agent_interactions(self, limit=50, offset=0):
+        rows = self.db.scalars(select(AgentInteraction).where(
+            AgentInteraction.workspace_id == self.workspace_id
+        ).order_by(AgentInteraction.started_at.desc()).offset(offset).limit(limit))
+        return [serial(row) for row in rows]
+
+    @audited
+    def get_agent_interaction(self, interaction_id):
+        return serial(self._get(AgentInteraction, interaction_id))
+
+    @audited
+    def replay_agent_interaction(self, interaction_id):
+        from backend.agent.messages import MessageRequest, reply
+        original = self._get(AgentInteraction, interaction_id)
+        request = MessageRequest(**original.request)
+        # Replay re-reads current authoritative state and exposes only read-only tools.
+        return reply(self, request, replay_of_id=original.id)
+
+    @audited
+    def create_agent_proposal(self, request: AgentProposalCreate):
+        if not self.human:
+            raise BusinessError("Explicit authenticated human action required", "HUMAN_REQUIRED", 403)
+        if self.role not in {"owner", "admin", "procurement", "procurement_user", "purchasing", "approver"}:
+            raise BusinessError("Your role cannot propose procurement changes", "FORBIDDEN", 403)
+        change = request.exact_change
+        if request.proposal_type == "PO_LINE_EDIT":
+            line = self._get(POLine, request.target_id)
+            draft = self._get(PODraft, line.draft_id)
+            self._version(draft, request.expected_version)
+            allowed = {"quantity", "unit_price"}
+            if not change or set(change) - allowed:
+                raise BusinessError("A PO line proposal may change only quantity or unit_price", "INVALID_PROPOSAL", 422)
+            # Pydantic performs the same numeric validation used by the domain write.
+            LineEdit(expected_version=request.expected_version, reason=request.reason, **change)
+            target_type = "po_line"
+        else:
+            draft = self._get(PODraft, request.target_id)
+            self._version(draft, request.expected_version)
+            if set(change) - {"comment"}:
+                raise BusinessError("An approval proposal may contain only a comment", "INVALID_PROPOSAL", 422)
+            Review(expected_version=request.expected_version, comment=str(change.get("comment") or request.reason), confirm=True)
+            target_type = "po_draft"
+        proposal = AgentProposal(
+            workspace_id=self.workspace_id, interaction_id=request.interaction_id,
+            proposal_type=request.proposal_type, target_type=target_type, target_id=request.target_id,
+            expected_version=request.expected_version, exact_change=serial(change), reason=request.reason,
+            status="PENDING", created_by=self.actor,
+        )
+        self.db.add(proposal)
+        self.db.flush()
+        return serial(proposal)
+
+    @audited
+    def list_agent_proposals(self, status=None, limit=50, offset=0):
+        query = select(AgentProposal).where(AgentProposal.workspace_id == self.workspace_id)
+        if status:
+            query = query.where(AgentProposal.status == status)
+        rows = self.db.scalars(query.order_by(AgentProposal.created_at.desc()).offset(offset).limit(limit))
+        return [serial(row) for row in rows]
+
+    @audited
+    def confirm_agent_proposal(self, proposal_id):
+        self._human()
+        proposal = self._get(AgentProposal, proposal_id, lock=True)
+        if proposal.status != "PENDING":
+            raise BusinessError("Only a pending proposal can be confirmed", "INVALID_STATE")
+        if proposal.proposal_type == "PO_APPROVAL" and self.role not in {"owner", "admin", "purchasing", "finance", "approver"}:
+            raise BusinessError("Your role cannot confirm this approval", "FORBIDDEN", 403)
+        proposal.status = "CONFIRMED"
+        proposal.confirmed_by = self.actor
+        proposal.confirmed_at = now()
+        return serial(proposal)
+
+    @audited
+    def execute_agent_proposal(self, proposal_id):
+        self._human()
+        proposal = self._get(AgentProposal, proposal_id, lock=True)
+        if proposal.status != "CONFIRMED" or not proposal.confirmed_by:
+            raise BusinessError("Confirm the exact change before execution", "CONFIRMATION_REQUIRED")
+        if proposal.proposal_type == "PO_LINE_EDIT":
+            line = self._get(POLine, proposal.target_id)
+            result = self.update_po_line(line.draft_id, line.id, LineEdit(
+                expected_version=proposal.expected_version, reason=proposal.reason, **proposal.exact_change))
+        elif proposal.proposal_type == "PO_APPROVAL":
+            result = self.matrix_approve(proposal.target_id, Review(
+                expected_version=proposal.expected_version,
+                comment=str(proposal.exact_change.get("comment") or proposal.reason), confirm=True))
+        else:
+            raise BusinessError("Unsupported proposal type", "INVALID_PROPOSAL", 422)
+        proposal = self._get(AgentProposal, proposal_id, lock=True)
+        proposal.status = "EXECUTED"
+        proposal.executed_at = now()
+        proposal.execution_result = serial(result)
+        return serial(proposal)
 
     def _locked_draft(self, draft_id):
         draft = self._get(PODraft, draft_id)

@@ -1635,6 +1635,25 @@ label {
   margin-top: 8px;
   color: #667085;
 }
+
+.agent-evidence {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #dce3ea);
+  font-size: 11px;
+  color: #5d6978;
+}
+.agent-evidence summary { cursor: pointer; color: #294b73; font-weight: 700; }
+.agent-evidence div { margin-top: 5px; overflow-wrap: anywhere; }
+.agent-unresolved {
+  margin-top: 9px;
+  padding: 8px 10px;
+  border: 1px solid #e6d5a7;
+  border-radius: 7px;
+  background: #fffaf0;
+  color: #76591a;
+  font-size: 12px;
+}
 .auth-methods {
   display: grid;
   grid-template-columns: 1fr 1fr;

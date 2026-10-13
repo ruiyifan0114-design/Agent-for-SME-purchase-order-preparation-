@@ -361,6 +361,53 @@ class ToolExecutionLog(Identity, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class AgentInteraction(Identity, Base):
+    """Immutable-enough execution record for inspecting and safely replaying an agent turn."""
+    __tablename__ = "agent_interaction"
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("procurement_run.id"), index=True)
+    replay_of_id: Mapped[str | None] = mapped_column(ForeignKey("agent_interaction.id"), index=True)
+    user_id: Mapped[str] = mapped_column(String(100), default="")
+    actor: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    provider: Mapped[str] = mapped_column(String(80))
+    model_name: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(40))
+    agent_config_version: Mapped[str] = mapped_column(String(40))
+    tool_definitions_version: Mapped[str] = mapped_column(String(40))
+    request: Mapped[dict] = mapped_column(JSON)
+    tool_definitions: Mapped[list] = mapped_column(JSON)
+    tool_trace: Mapped[list] = mapped_column(JSON, default=list)
+    final_outcome: Mapped[dict | None] = mapped_column(JSON)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=0)
+    correlation_id: Mapped[str] = mapped_column(String(64), default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentProposal(Identity, Base):
+    """A sensitive change proposed by the agent but executed only by domain services."""
+    __tablename__ = "agent_proposal"
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
+    interaction_id: Mapped[str | None] = mapped_column(ForeignKey("agent_interaction.id"), index=True)
+    proposal_type: Mapped[str] = mapped_column(String(50), index=True)
+    target_type: Mapped[str] = mapped_column(String(50))
+    target_id: Mapped[str] = mapped_column(String(36), index=True)
+    expected_version: Mapped[int] = mapped_column(Integer)
+    exact_change: Mapped[dict] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
+    created_by: Mapped[str] = mapped_column(String(200))
+    confirmed_by: Mapped[str | None] = mapped_column(String(200))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    execution_result: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class JobRecord(Identity, Base):
     __tablename__ = "job_record"
     __table_args__ = (UniqueConstraint("workspace_id", "idempotency_key"),)

@@ -218,6 +218,33 @@ export interface AgentReply {
   unit_price?: string | null
   provider: string
   tools_used?: string[]
+  interaction_id?: string
+  evidence?: AgentEvidence[]
+  evidence_complete?: boolean
+  unresolved?: string[]
+  confirmation_required?: boolean
+}
+
+export interface AgentEvidence {
+  source: string
+  record_id: string
+  field: string
+  timestamp: string
+  version: string
+}
+
+export interface AgentProposal {
+  id: string
+  proposal_type: 'PO_LINE_EDIT' | 'PO_APPROVAL'
+  target_type: string
+  target_id: string
+  expected_version: number
+  exact_change: Record<string, unknown>
+  reason: string
+  status: 'PENDING' | 'CONFIRMED' | 'EXECUTED' | 'CANCELLED' | 'FAILED'
+  created_by: string
+  confirmed_by?: string | null
+  created_at: string
 }
 
 export interface ChatTurn {

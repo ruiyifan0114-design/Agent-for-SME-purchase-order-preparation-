@@ -251,6 +251,19 @@ class LifecycleRequest(StrictModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class AgentProposalCreate(StrictModel):
+    proposal_type: Literal["PO_LINE_EDIT", "PO_APPROVAL"]
+    target_id: str = Field(min_length=1, max_length=36)
+    expected_version: Positive
+    exact_change: dict
+    reason: str = Field(min_length=3, max_length=2000)
+    interaction_id: str | None = Field(default=None, max_length=36)
+
+
+class AgentProposalConfirm(StrictModel):
+    confirm: Literal[True]
+
+
 class FinanceDimensionsRequest(StrictModel):
     cost_center: str | None = Field(default=None, max_length=80)
     project_code: str | None = Field(default=None, max_length=80)

@@ -1,5 +1,5 @@
 import type {
-  AgentReply,
+  AgentProposal, AgentReply,
   ChatTurn,
   ApprovalEvent,
   AuditEvent,
@@ -238,4 +238,13 @@ export const api = {
       sku_id: sku_id || null,
       history: history.slice(-10),
     }),
+  agentInteractions: (limit = 50, offset = 0) =>
+    request<unknown[]>(`/agent/interactions?limit=${limit}&offset=${offset}`),
+  replayAgentInteraction: (id: string) => post<AgentReply>(`/agent/interactions/${id}/replay`),
+  agentProposals: (status?: string) =>
+    request<AgentProposal[]>(`/agent/proposals${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  createAgentProposal: (proposal: Omit<AgentProposal, 'id' | 'status' | 'created_by' | 'confirmed_by' | 'created_at' | 'target_type'>) =>
+    post<AgentProposal>('/agent/proposals', proposal, true),
+  confirmAgentProposal: (id: string) => post<AgentProposal>(`/agent/proposals/${id}/confirm`, { confirm: true }, true),
+  executeAgentProposal: (id: string) => post<AgentProposal>(`/agent/proposals/${id}/execute`, undefined, true),
 }

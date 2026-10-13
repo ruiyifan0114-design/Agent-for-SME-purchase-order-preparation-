@@ -229,7 +229,7 @@ cd ..
 
 The current version has passed:
 
-- 122 backend and integration tests, including workspace isolation, rule snapshots, duplicate prevention, authorization, migration round trips, receipt/invoice matching, approval invalidation and worker execution
+- 132 backend and integration tests, including workspace isolation, rule snapshots, duplicate prevention, authorization, migration round trips, receipt/invoice matching, approval invalidation, Agent adversarial controls, proposal confirmation and worker execution
 - 15 isolated browser workflows including manual entry, editing, duplication/deletion, two-stage approval, PO lifecycle, partial receipt, invoice exceptions, export, chat navigation and mobile layout
 - TypeScript checks and Vite production build
 - Alembic upgrade, downgrade, re-upgrade, and schema drift checks
@@ -237,7 +237,7 @@ The current version has passed:
 
 Docker configuration is provided, but the image build has not yet been tested locally because a working Docker engine was unavailable on the development machine at the time. The DeepSeek tool loop is covered by mocked response tests and has also been verified once against the real API using the local synthetic procurement dataset.
 
-For more detailed API and verification information, see the [API Documentation](docs/api.md), [Business Decision Records](docs/business-decisions.md), [Frontend Documentation](frontend/README.md), and [Verification Records](docs/verification.md).
+For more detailed API and verification information, see the [API Documentation](docs/api.md), [Agent Operations and Evaluation](docs/AGENT_OPERATIONS.md), [Business Decision Records](docs/business-decisions.md), [Frontend Documentation](frontend/README.md), and [Verification Records](docs/verification.md).
 
 ## Project Scope
 

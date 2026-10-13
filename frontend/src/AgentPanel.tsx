@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, Bot, Loader2, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from './api'
-import type { AgentReply, ChatTurn } from './types'
+import type { AgentEvidence, AgentReply, ChatTurn } from './types'
 
 const welcome = {
   role: 'agent' as const,
@@ -55,7 +55,8 @@ export default function AgentPanel({
   onAction: (r: AgentReply) => void
 }) {
   const [messages, setMessages] = useState<
-    { role: 'user' | 'agent' | 'error'; text: string; provider?: string; tools?: string[] }[]
+    { role: 'user' | 'agent' | 'error'; text: string; provider?: string; tools?: string[];
+      evidence?: AgentEvidence[]; unresolved?: string[]; evidenceComplete?: boolean; interactionId?: string }[]
   >([welcome])
   const [input, setInput] = useState(''),
     [busy, setBusy] = useState(false),
@@ -94,6 +95,10 @@ export default function AgentPanel({
           text: response.message,
           provider: response.provider,
           tools: response.tools_used,
+          evidence: response.evidence,
+          unresolved: response.unresolved,
+          evidenceComplete: response.evidence_complete,
+          interactionId: response.interaction_id,
         },
       ])
       onAction(response)
@@ -147,6 +152,22 @@ export default function AgentPanel({
                   : m.provider}
               </small>
             )}
+            {!!m.evidence?.length && (
+              <details className="agent-evidence">
+                <summary>{m.evidence.length} evidence field{m.evidence.length === 1 ? '' : 's'}</summary>
+                {m.evidence.slice(0, 12).map((item, index) => (
+                  <div key={`${item.record_id}-${item.field}-${index}`}>
+                    <strong>{item.field}</strong> · {item.source} · {item.record_id} · v{item.version}
+                  </div>
+                ))}
+                {m.evidence.length > 12 && <div>Open the audit view for the remaining evidence.</div>}
+                {m.evidenceComplete === false && <div>Evidence list continues; no completeness claim was made.</div>}
+              </details>
+            )}
+            {!!m.unresolved?.length && (
+              <div className="agent-unresolved"><strong>Unresolved</strong>: {m.unresolved.join('; ')}</div>
+            )}
+            {m.interactionId && <small>Audit run {m.interactionId}</small>}
           </div>
         ))}
         {busy && (

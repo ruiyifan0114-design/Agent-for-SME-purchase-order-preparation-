@@ -99,4 +99,15 @@ Inspect `severity`: WARNING does not block a line, BLOCKING does. Show `decision
 
 Import parsing errors return 422. Validly parsed but structurally invalid datasets return a stored REJECTED import resource (201), with detailed issues; clients must inspect its status before continuing. Internal tool failures return 500, record FAILED where the database is available, and are never translated to a success report. After a failed Agent call, list runs and resume the created run rather than blindly creating another one.
 
+## Agent operations
+
+- `POST /api/v1/agent/message` runs the bounded, read-only Agent and returns evidence plus an `interaction_id`.
+- `GET /api/v1/agent/interactions` and `GET /api/v1/agent/interactions/{id}` inspect model, prompt/tool versions, validated calls, hashed result references and outcome.
+- `POST /api/v1/agent/interactions/{id}/replay` safely replays the question against current authoritative state; it never replays a historical write.
+- `POST /api/v1/agent/proposals` stores an exact `PO_LINE_EDIT` or `PO_APPROVAL` proposal without changing the PO.
+- `POST /api/v1/agent/proposals/{id}/confirm` records explicit authorized human confirmation.
+- `POST /api/v1/agent/proposals/{id}/execute` revalidates the target version and delegates to the deterministic PO or approval service.
+
+List tools are cursor-paginated with a maximum page size of 50 and always report `total`, `next_cursor` and `complete`. Viewer Agent calls cannot access spend, purchase-order details or simulation tools, and commercial fields returned by allowed tools are redacted by the backend.
+
 Exports are saved as full immutable snapshots in approval/export history and returned as CSV; no filesystem path is supplied by the client. Draft GET provides a preview at any time. Export does not send orders, post inventory, or create live ERP transactions.

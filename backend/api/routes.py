@@ -17,7 +17,7 @@ from backend.api.dependencies import (
 from backend.db.session import get_session
 from backend.domain.intake import MAX_BYTES
 from backend.domain.schemas import (
-    DemoCredentials, JobCreate, LineEdit, MemberInvite, MemberUpdate, Resolution, Review,
+    AgentProposalConfirm, AgentProposalCreate, DemoCredentials, JobCreate, LineEdit, MemberInvite, MemberUpdate, Resolution, Review,
     ApprovalRuleCreate, BudgetCreate, CommercialAgreementCreate, DelegationCreate,
     FinanceDimensionsRequest, InventoryPolicyCreate, InventoryPolicyRequest, InvoiceRequest,
     LifecycleRequest, ReceiptRequest, RuleSetCreate, RunRequest, SimulationRequest,
@@ -566,6 +566,42 @@ def agent_resume(run_id: str, t=Depends(write_tools)):
 @router.post("/agent/message", response_model=Envelope)
 def agent_message(request: MessageRequest, t=Depends(tools)):
     return ok(t.agent_message(request))
+
+
+@router.get("/agent/interactions", response_model=Envelope)
+def agent_interactions(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), t=Depends(tools)):
+    return ok(t.list_agent_interactions(limit, offset))
+
+
+@router.get("/agent/interactions/{interaction_id}", response_model=Envelope)
+def agent_interaction(interaction_id: str, t=Depends(tools)):
+    return ok(t.get_agent_interaction(interaction_id))
+
+
+@router.post("/agent/interactions/{interaction_id}/replay", response_model=Envelope)
+def replay_agent_interaction(interaction_id: str, t=Depends(tools)):
+    return ok(t.replay_agent_interaction(interaction_id))
+
+
+@router.get("/agent/proposals", response_model=Envelope)
+def agent_proposals(status: str | None = None, limit: int = Query(50, ge=1, le=100),
+                    offset: int = Query(0, ge=0), t=Depends(tools)):
+    return ok(t.list_agent_proposals(status, limit, offset))
+
+
+@router.post("/agent/proposals", response_model=Envelope)
+def create_agent_proposal(request: AgentProposalCreate, t=Depends(write_tools)):
+    return ok(t.create_agent_proposal(request))
+
+
+@router.post("/agent/proposals/{proposal_id}/confirm", response_model=Envelope)
+def confirm_agent_proposal(proposal_id: str, request: AgentProposalConfirm, t=Depends(write_tools)):
+    return ok(t.confirm_agent_proposal(proposal_id))
+
+
+@router.post("/agent/proposals/{proposal_id}/execute", response_model=Envelope)
+def execute_agent_proposal(proposal_id: str, t=Depends(write_tools)):
+    return ok(t.execute_agent_proposal(proposal_id))
 
 
 @router.get("/demo/{scenario}", response_model=Envelope)
