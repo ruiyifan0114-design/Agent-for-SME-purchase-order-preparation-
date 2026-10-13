@@ -1,4 +1,5 @@
 from typing import Any
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Header, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -16,15 +17,21 @@ from backend.api.dependencies import (
 from backend.db.session import get_session
 from backend.domain.intake import MAX_BYTES
 from backend.domain.schemas import (
-    DemoCredentials, LineEdit, MemberInvite, MemberUpdate, Resolution, Review, RunRequest,
-    SimulationRequest, WorkspaceCreate, WorkspaceUpdate,
+    DemoCredentials, JobCreate, LineEdit, MemberInvite, MemberUpdate, Resolution, Review,
+    ApprovalRuleCreate, BudgetCreate, CommercialAgreementCreate, DelegationCreate,
+    FinanceDimensionsRequest, InventoryPolicyCreate, InventoryPolicyRequest, InvoiceRequest,
+    LifecycleRequest, ReceiptRequest, RuleSetCreate, RunRequest, SimulationRequest,
+    SourcingRequest, SupplierPerformanceCreate, WorkspaceCreate, WorkspaceUpdate,
 )
+from backend.jobs.service import JobService
 from backend.models.entities import (
-    DemoAccount, DemoSession, ImportBatch, Organization, ToolExecutionLog, Workspace,
+    DemoAccount, DemoSession, ImportBatch, JobRecord, Organization, RuleSet, ToolExecutionLog, Workspace,
     WorkspaceMembership,
 )
 from backend.skills.workflows import Approval, ExceptionResolution
 from backend.tools.runtime import BusinessError, serial
+from backend.domain.inventory.engine import inventory_policy
+from backend.domain.sourcing.engine import rank_suppliers
 
 
 class Envelope(BaseModel):
@@ -133,6 +140,13 @@ def create_workspace(request: WorkspaceCreate, db=Depends(get_session), user=Dep
     )
     db.add(workspace)
     db.flush()
+    db.add(RuleSet(
+        workspace_id=workspace.id, rule_version=1,
+        effective_from=datetime.now(timezone.utc),
+        rules={"replenishment_policy": "BELOW_SAFETY_TO_TARGET", "rounding_policy": "MOQ_PACK_CEILING"},
+        approval_policy={"currency": workspace.currency, "finance_threshold": str(workspace.finance_threshold)},
+        created_by=user["actor"],
+    ))
     membership = WorkspaceMembership(
         workspace_id=workspace.id, user_id=user["user_id"], email=user["email"],
         display_name=user["actor"], role="owner",
@@ -161,8 +175,25 @@ def update_workspace(workspace_id: str, request: WorkspaceUpdate, db=Depends(get
                      identity=Depends(workspace_identity)):
     _owner(identity)
     workspace = _selected_workspace(db, workspace_id, identity)
+    old_policy = (workspace.currency, workspace.finance_threshold)
     for key, value in request.model_dump().items():
         setattr(workspace, key, value)
+    if old_policy != (workspace.currency, workspace.finance_threshold):
+        latest = db.scalar(select(RuleSet).where(RuleSet.workspace_id == workspace_id)
+                           .order_by(RuleSet.rule_version.desc()).limit(1))
+        effective = datetime.now(timezone.utc)
+        if latest and latest.effective_to is None:
+            latest.effective_to = effective
+        db.add(RuleSet(
+            workspace_id=workspace_id, rule_version=(latest.rule_version if latest else 0) + 1,
+            effective_from=effective,
+            rules=(latest.rules if latest else {
+                "replenishment_policy": "BELOW_SAFETY_TO_TARGET", "rounding_policy": "MOQ_PACK_CEILING"
+            }),
+            approval_policy={"currency": workspace.currency,
+                             "finance_threshold": str(workspace.finance_threshold)},
+            created_by=identity["actor"],
+        ))
     db.commit()
     membership = db.scalar(select(WorkspaceMembership).where(
         WorkspaceMembership.workspace_id == workspace_id,
@@ -184,6 +215,8 @@ def delete_workspace(workspace_id: str, db=Depends(get_session),
         )
     organization_id = workspace.org_id
     db.execute(delete(ToolExecutionLog).where(ToolExecutionLog.workspace_id == workspace_id))
+    db.execute(delete(JobRecord).where(JobRecord.workspace_id == workspace_id))
+    db.execute(delete(RuleSet).where(RuleSet.workspace_id == workspace_id))
     db.execute(delete(WorkspaceMembership).where(WorkspaceMembership.workspace_id == workspace_id))
     db.delete(workspace)
     db.flush()
@@ -254,12 +287,14 @@ def remove_member(workspace_id: str, member_id: str, db=Depends(get_session),
 
 
 @router.post("/imports", response_model=Envelope, status_code=201)
-def import_json(dataset: dict, filename: str = Query("dataset.json", min_length=1, max_length=255), t=Depends(write_tools)):
-    return ok(t.import_dataset(dataset, filename))
+def import_json(dataset: dict, filename: str = Query("dataset.json", min_length=1, max_length=255),
+                idempotency_key: str = Header(default="", alias="Idempotency-Key"), t=Depends(write_tools)):
+    return ok(t.import_dataset(dataset, filename, idempotency_key or None))
 
 
 @router.post("/imports/upload", response_model=Envelope, status_code=201)
-async def upload(files: list[UploadFile] = File(...), t=Depends(write_tools)):
+async def upload(files: list[UploadFile] = File(...),
+                 idempotency_key: str = Header(default="", alias="Idempotency-Key"), t=Depends(write_tools)):
     if len(files) > 6:
         raise BusinessError("Provide at most 6 CSVs or one workbook", "INVALID_UPLOAD", 422)
     inputs, total = [], 0
@@ -269,7 +304,7 @@ async def upload(files: list[UploadFile] = File(...), t=Depends(write_tools)):
         if total > MAX_BYTES:
             raise BusinessError("Upload exceeds 10 MiB", "PAYLOAD_TOO_LARGE", 413)
         inputs.append((file.filename or "unknown", content))
-    return ok(t.import_files(inputs))
+    return ok(t.import_files(inputs, idempotency_key or None))
 
 
 @router.get("/imports", response_model=Envelope)
@@ -288,8 +323,37 @@ def delete_import(batch_id: str, t=Depends(write_tools)):
 
 
 @router.post("/runs", response_model=Envelope, status_code=201)
-def create_run(request: RunRequest, t=Depends(write_tools)):
-    return ok(t.create_procurement_run(request))
+def create_run(request: RunRequest, idempotency_key: str = Header(default="", alias="Idempotency-Key"),
+               t=Depends(write_tools)):
+    return ok(t.create_procurement_run(request, idempotency_key or None))
+
+
+@router.get("/rules", response_model=Envelope)
+def rules(t=Depends(tools)):
+    return ok(t.list_rule_sets())
+
+
+@router.post("/rules", response_model=Envelope, status_code=201)
+def create_rules(request: RuleSetCreate, t=Depends(tools)):
+    return ok(t.create_rule_set(request))
+
+
+@router.post("/jobs", response_model=Envelope, status_code=202)
+def create_job(request: JobCreate, t=Depends(write_tools)):
+    return ok(serial(JobService(t.db, t).create(
+        request.job_type, request.idempotency_key, resource_id=request.resource_id,
+        dataset=request.dataset, filename=request.filename,
+    )))
+
+
+@router.get("/jobs/{job_id}", response_model=Envelope)
+def get_job(job_id: str, t=Depends(tools)):
+    return ok(serial(JobService(t.db, t).get(job_id)))
+
+
+@router.post("/jobs/{job_id}/execute", response_model=Envelope)
+def execute_job(job_id: str, t=Depends(write_tools)):
+    return ok(serial(JobService(t.db, t).run(job_id)))
 
 
 @router.get("/runs", response_model=Envelope)
@@ -362,14 +426,104 @@ def simulate(run_id: str, request: SimulationRequest, t=Depends(tools)):
     return ok(t.simulate_procurement(run_id, request))
 
 
+@router.post("/domain/inventory/evaluate", response_model=Envelope)
+def evaluate_inventory_policy(request: InventoryPolicyRequest, t=Depends(tools)):
+    try:
+        return ok(inventory_policy(request.inputs, request.policy))
+    except (ValueError, KeyError) as exc:
+        raise BusinessError(str(exc), "INVALID_POLICY_INPUT", 422) from exc
+
+
+@router.post("/domain/sourcing/recommend", response_model=Envelope)
+def recommend_sourcing(request: SourcingRequest, t=Depends(tools)):
+    try:
+        return ok(rank_suppliers(request.required_quantity, request.offers, request.as_of,
+                                 request.weights, request.allow_split))
+    except (ValueError, KeyError) as exc:
+        raise BusinessError(str(exc), "INVALID_SOURCING_INPUT", 422) from exc
+
+
+@router.post("/runs/{run_id}/skus/{sku_id}/sourcing", response_model=Envelope)
+def source_run_sku(run_id: str, sku_id: str, request: SourcingRequest, t=Depends(write_tools)):
+    try:
+        return ok(t.source_sku(run_id, sku_id, request))
+    except (ValueError, KeyError) as exc:
+        raise BusinessError(str(exc), "INVALID_SOURCING_INPUT", 422) from exc
+
+
+@router.get("/domain/{kind}", response_model=Envelope)
+def domain_records(kind: str, t=Depends(tools)):
+    return ok(t.list_domain_records(kind))
+
+
+@router.post("/domain/supplier-performance", response_model=Envelope, status_code=201)
+def supplier_performance(request: SupplierPerformanceCreate, t=Depends(write_tools)):
+    return ok(t.create_domain_record("supplier-performance", request))
+
+
+@router.post("/domain/commercial-agreements", response_model=Envelope, status_code=201)
+def commercial_agreement(request: CommercialAgreementCreate, t=Depends(write_tools)):
+    return ok(t.create_domain_record("commercial-agreements", request))
+
+
+@router.post("/domain/inventory-policies", response_model=Envelope, status_code=201)
+def inventory_policy_record(request: InventoryPolicyCreate, t=Depends(write_tools)):
+    return ok(t.create_domain_record("inventory-policies", request))
+
+
+@router.post("/domain/approval-rules", response_model=Envelope, status_code=201)
+def approval_rule(request: ApprovalRuleCreate, t=Depends(write_tools)):
+    return ok(t.create_domain_record("approval-rules", request))
+
+
+@router.post("/domain/delegations", response_model=Envelope, status_code=201)
+def delegation(request: DelegationCreate, t=Depends(write_tools)):
+    return ok(t.create_domain_record("delegations", request))
+
+
+@router.post("/domain/budgets", response_model=Envelope, status_code=201)
+def budget(request: BudgetCreate, t=Depends(write_tools)):
+    return ok(t.create_domain_record("budgets", request))
+
+
 @router.patch("/drafts/{draft_id}/lines/{line_id}", response_model=Envelope)
 def edit(draft_id: str, line_id: str, request: LineEdit, t=Depends(write_tools)):
     return ok(t.update_po_line(draft_id, line_id, request))
 
 
+@router.patch("/drafts/{draft_id}/finance", response_model=Envelope)
+def finance_dimensions(draft_id: str, request: FinanceDimensionsRequest, t=Depends(write_tools)):
+    return ok(t.set_finance_dimensions(draft_id, request))
+
+
+@router.post("/drafts/{draft_id}/lifecycle", response_model=Envelope)
+def lifecycle(draft_id: str, request: LifecycleRequest, t=Depends(write_tools)):
+    return ok(t.transition_po_lifecycle(draft_id, request.target_status, request.reason))
+
+
+@router.post("/drafts/{draft_id}/receipts", response_model=Envelope, status_code=201)
+def receipt(draft_id: str, request: ReceiptRequest, t=Depends(write_tools)):
+    return ok(t.record_goods_receipt(draft_id, request))
+
+
+@router.post("/drafts/{draft_id}/invoices", response_model=Envelope, status_code=201)
+def invoice(draft_id: str, request: InvoiceRequest, t=Depends(write_tools)):
+    return ok(t.record_and_match_invoice(draft_id, request))
+
+
 @router.post("/drafts/{draft_id}/approve", response_model=Envelope)
 def approve(draft_id: str, request: Review, t=Depends(purchasing_tools)):
     return ok(Approval(t).execute(draft_id, request))
+
+
+@router.get("/drafts/{draft_id}/approval-plan", response_model=Envelope)
+def approval_plan(draft_id: str, t=Depends(tools)):
+    return ok(t.approval_plan(draft_id))
+
+
+@router.post("/drafts/{draft_id}/matrix-approve", response_model=Envelope)
+def matrix_approve(draft_id: str, request: Review, t=Depends(reviewer_tools)):
+    return ok(t.matrix_approve(draft_id, request))
 
 
 @router.post("/drafts/{draft_id}/reject", response_model=Envelope)
@@ -428,3 +582,12 @@ def demo_dataset(scenario: str, t=Depends(tools)):
             dict(sku_id="SKU-002", po_number="SYNTHETIC-LATE", quantity=100, arrival_date=(today+timedelta(days=8)).isoformat(), status="OPEN")]
     policy = run_request("", today).model_dump(mode="json", exclude={"batch_id"})
     return ok({"dataset": data, "policy": policy})
+
+
+@router.get("/demo/advanced/{scenario_name}", response_model=Envelope)
+def advanced_demo(scenario_name: str, t=Depends(tools)):
+    from backend.advanced_demo import scenario
+    try:
+        return ok(scenario(scenario_name))
+    except KeyError as exc:
+        raise BusinessError("Unknown advanced synthetic scenario", "NOT_FOUND", 404) from exc

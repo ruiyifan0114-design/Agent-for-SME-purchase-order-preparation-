@@ -239,6 +239,45 @@ test('normal review, explicit approval, export, critical edit and rejection', as
   expect(errors).toEqual([])
 })
 
+test('approved PO records sent status, partial receipt and invoice matching exception', async ({ page }) => {
+  await start(page, '01')
+  await nav(page, 'PO drafts 3')
+  const openOperations = async (draftCard: ReturnType<Page['locator']>) => {
+    const panel = draftCard.locator('details.procurement-operations')
+    if (!(await panel.evaluate(element => (element as HTMLDetailsElement).open)))
+      await panel.locator('summary').click()
+  }
+  let card = await approve(page, 'Synthetic Supplier A')
+  await openOperations(card)
+  await card.getByLabel('Record type').selectOption('lifecycle')
+  await card.getByLabel('New status').selectOption('SENT')
+  await card.getByLabel('Reason').fill('Sent manually by the purchasing team')
+  await card.getByRole('button', { name: 'Save record' }).click()
+  await expect(card.getByRole('status')).toContainText('PO status updated')
+
+  card = page.locator('.draft-card').filter({ hasText: 'Synthetic Supplier A' })
+  await openOperations(card)
+  await card.getByLabel('Record type').selectOption('receipt')
+  await card.getByLabel('Document reference').fill(`GR-E2E-${Date.now()}`)
+  await card.getByLabel('Document date').fill('2026-09-28')
+  await card.getByLabel('Delivered quantity').fill('1')
+  await card.getByRole('button', { name: 'Save record' }).click()
+  await expect(card.getByRole('status')).toContainText('Goods receipt saved')
+
+  card = page.locator('.draft-card').filter({ hasText: 'Synthetic Supplier A' })
+  await openOperations(card)
+  await card.getByLabel('Record type').selectOption('invoice')
+  await card.getByLabel('Document reference').fill(`INV-E2E-${Date.now()}`)
+  await card.getByLabel('Document date').fill('2026-09-29')
+  await card.getByLabel('Invoice quantity').fill('2')
+  await card.getByLabel(/Invoice unit price/).fill('1')
+  await card.getByLabel('Recorded FX rate').fill('1')
+  await card.getByLabel('FX date').fill('2026-09-29')
+  await card.getByLabel('FX source').fill('same-currency')
+  await card.getByRole('button', { name: 'Save record' }).click()
+  await expect(card.getByRole('status')).toContainText('quantity mismatch')
+})
+
 test('timely incoming prevents purchase; late incoming preserves timing gap', async ({ page }) => {
   await start(page, '02')
   await nav(page, 'SKU check')

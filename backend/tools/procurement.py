@@ -4,26 +4,37 @@ import io
 import json
 from copy import deepcopy
 from collections import Counter
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy import delete, select
 from backend.domain.engine import amount, evaluate
-from backend.domain.intake import normalize, read_files
-from backend.domain.schemas import LineEdit, Resolution, Review, RunRequest, SimulationRequest
+from backend.domain.intake import normalize
+from backend.integrations.adapters import CSVAdapter, JSONAdapter, SourceEnvelope
+from backend.domain.schemas import LineEdit, Resolution, Review, RuleSetCreate, RunRequest, SimulationRequest
 from backend.models.entities import (ApprovalEvent, Demand, ExceptionRecord, ImportBatch, Inventory,
     LEGACY_WORKSPACE_ID, OpenPO, PODraft, POLine, ProcurementRun, SKU, SKUCheckResult,
-    Supplier, SupplierSKU, ToolExecutionLog, Workspace, now)
+    RuleSet, Supplier, SupplierSKU, ToolExecutionLog, Workspace, now, GoodsReceipt,
+    GoodsReceiptLine, SupplierInvoice, SupplierInvoiceLine, MatchResult, SourcingDecision)
+from backend.models.entities import (SupplierPerformance, CommercialAgreement, SKUInventoryPolicy,
+    ApprovalMatrixRule, ApprovalDelegation, Budget)
 from backend.tools.runtime import BusinessError, audited, serial
+from backend.observability import increment
+from backend.domain.receiving.engine import apply_receipt, transition_po
+from backend.domain.matching.engine import three_way_match
+from backend.domain.approval.engine import resolve_approval_steps
+from backend.domain.sourcing.engine import rank_suppliers
 
 TABLE_MODELS = {"sku_master": SKU, "supplier_master": Supplier, "supplier_sku": SupplierSKU,
                 "inventory_snapshot": Inventory, "demand": Demand, "open_po": OpenPO}
 class ProcurementTools:
-    def __init__(self, db, actor="service", human=False, role="purchasing", workspace_id=LEGACY_WORKSPACE_ID):
+    def __init__(self, db, actor="service", human=False, role="purchasing", workspace_id=LEGACY_WORKSPACE_ID,
+                 user_id="", correlation_id=""):
         self.db, self.actor, self.human, self.role = db, actor, human, role
         self.workspace_id = workspace_id
+        self.user_id, self.correlation_id = user_id, correlation_id
 
     def _resource_workspace(self, obj):
-        if isinstance(obj, (ImportBatch, ToolExecutionLog)):
+        if isinstance(obj, (ImportBatch, ToolExecutionLog, RuleSet)):
             return obj.workspace_id
         if isinstance(obj, (SKU, Supplier, SupplierSKU, Inventory, Demand, OpenPO)):
             batch = self.db.get(ImportBatch, obj.batch_id)
@@ -37,6 +48,19 @@ class ProcurementTools:
         if isinstance(obj, (POLine, ApprovalEvent)):
             draft = self.db.get(PODraft, obj.draft_id)
             return self._resource_workspace(draft) if draft else None
+        if isinstance(obj, GoodsReceipt):
+            return obj.workspace_id
+        if isinstance(obj, GoodsReceiptLine):
+            receipt = self.db.get(GoodsReceipt, obj.receipt_id)
+            return receipt.workspace_id if receipt else None
+        if isinstance(obj, SupplierInvoice):
+            return obj.workspace_id
+        if isinstance(obj, (SupplierInvoiceLine, MatchResult)):
+            invoice = self.db.get(SupplierInvoice, obj.invoice_id)
+            return invoice.workspace_id if invoice else None
+        if isinstance(obj, SourcingDecision):
+            result = self.db.get(SKUCheckResult, obj.result_id)
+            return self._resource_workspace(result) if result else None
         return None
 
     def _get(self, model, identifier, lock=False):
@@ -54,41 +78,255 @@ class ProcurementTools:
     def _human(self, role="purchasing"):
         if not self.human or not self.actor.strip():
             raise BusinessError("Explicit authenticated human action required", "HUMAN_REQUIRED", 403)
-        if self.role not in {role, "owner"}:
+        aliases = {"purchasing": {"purchasing", "approver"}, "finance": {"finance", "approver"}}
+        if self.role not in aliases.get(role, {role}) | {"owner", "admin"}:
             raise BusinessError(f"This action requires the {role} reviewer role", "REVIEWER_ROLE_REQUIRED", 403)
 
-    def _import(self, raw, filename):
+    def _active_rules(self, at: datetime | None = None):
+        at = at or datetime.now(timezone.utc)
+        query = select(RuleSet).where(
+            RuleSet.workspace_id == self.workspace_id,
+            RuleSet.effective_from <= at,
+            (RuleSet.effective_to.is_(None) | (RuleSet.effective_to > at)),
+        ).order_by(RuleSet.rule_version.desc())
+        rules = self.db.scalar(query.limit(1))
+        if rules:
+            return rules
+        workspace = self.db.get(Workspace, self.workspace_id)
+        if workspace is None:
+            raise BusinessError("Workspace not found", "NOT_FOUND", 404)
+        rules = RuleSet(
+            workspace_id=self.workspace_id, rule_version=1,
+            effective_from=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            rules={"replenishment_policy": "BELOW_SAFETY_TO_TARGET", "rounding_policy": "MOQ_PACK_CEILING"},
+            approval_policy={"currency": workspace.currency, "finance_threshold": str(workspace.finance_threshold)},
+            created_by="system-migration",
+        )
+        self.db.add(rules)
+        self.db.flush()
+        return rules
+
+    @audited
+    def list_rule_sets(self):
+        return list(self.db.scalars(select(RuleSet).where(
+            RuleSet.workspace_id == self.workspace_id
+        ).order_by(RuleSet.rule_version.desc())))
+
+    @audited
+    def create_rule_set(self, request: RuleSetCreate):
+        if self.role not in {"owner", "admin"}:
+            raise BusinessError("Workspace administrator permission required", "FORBIDDEN", 403)
+        latest = self.db.scalar(select(RuleSet).where(
+            RuleSet.workspace_id == self.workspace_id
+        ).order_by(RuleSet.rule_version.desc()).limit(1))
+        version = (latest.rule_version if latest else 0) + 1
+        requested_at = request.effective_from
+        latest_at = latest.effective_from if latest else None
+        if latest_at and latest_at.tzinfo is None and requested_at.tzinfo is not None:
+            latest_at = latest_at.replace(tzinfo=timezone.utc)
+        if latest and requested_at <= latest_at:
+            raise BusinessError("A new rule version must start after the latest version", "RULE_DATE_CONFLICT", 409)
+        if latest and latest.effective_to is None:
+            latest.effective_to = request.effective_from
+        rule = RuleSet(
+            workspace_id=self.workspace_id, rule_version=version,
+            effective_from=request.effective_from, effective_to=request.effective_to,
+            rules={
+                "replenishment_policy": "BELOW_SAFETY_TO_TARGET",
+                "rounding_policy": "MOQ_PACK_CEILING",
+                "default_horizon_days": request.default_horizon_days,
+                "inventory_max_age_days": request.inventory_max_age_days,
+                "commercial_max_age_days": request.commercial_max_age_days,
+                "matching_tolerances": {"quantity": request.matching_quantity_tolerance,
+                                        "price_percent": str(request.matching_price_tolerance_percent)},
+            },
+            approval_policy={"currency": request.currency,
+                             "finance_threshold": str(request.finance_threshold)},
+            created_by=self.actor,
+        )
+        self.db.add(rule)
+        self.db.flush()
+        return rule
+
+    @audited
+    def create_domain_record(self, kind, request):
+        models = {
+            "supplier-performance": SupplierPerformance,
+            "commercial-agreements": CommercialAgreement,
+            "inventory-policies": SKUInventoryPolicy,
+            "approval-rules": ApprovalMatrixRule,
+            "delegations": ApprovalDelegation,
+            "budgets": Budget,
+        }
+        model = models.get(kind)
+        if model is None:
+            raise BusinessError("Unknown domain resource", "NOT_FOUND", 404)
+        if kind in {"approval-rules", "delegations", "budgets"} and self.role not in {"owner", "admin"}:
+            raise BusinessError("Workspace administrator permission required", "FORBIDDEN", 403)
+        values = request.model_dump()
+        if model is ApprovalMatrixRule:
+            conditions = values.pop("conditions")
+            values.update(conditions=conditions)
+        if model is ApprovalDelegation:
+            values["created_by"] = self.actor
+        record = model(workspace_id=self.workspace_id, **values)
+        self.db.add(record)
+        self.db.flush()
+        return record
+
+    @audited
+    def list_domain_records(self, kind):
+        models = {
+            "supplier-performance": SupplierPerformance,
+            "commercial-agreements": CommercialAgreement,
+            "inventory-policies": SKUInventoryPolicy,
+            "approval-rules": ApprovalMatrixRule,
+            "delegations": ApprovalDelegation,
+            "budgets": Budget,
+        }
+        model = models.get(kind)
+        if model is None:
+            raise BusinessError("Unknown domain resource", "NOT_FOUND", 404)
+        return list(self.db.scalars(select(model).where(model.workspace_id == self.workspace_id).order_by(model.id)))
+
+    @audited
+    def source_sku(self, run_id, sku_id, request):
+        run = self._get(ProcurementRun, run_id, lock=True)
+        if request.as_of != run.as_of:
+            raise BusinessError("Sourcing date must match the procurement run date", "PRICING_DATE_CONFLICT")
+        offers = deepcopy(request.offers)
+        snapshots = run.rules_snapshot or {}
+        for offer in offers:
+            agreements = [item for item in snapshots.get("commercial_agreements", [])
+                          if item["sku_id"] == sku_id and item["supplier_id"] == offer["supplier_id"]]
+            if agreements:
+                agreement = max(agreements, key=lambda item: item["rule_version"])
+                if sum(item["rule_version"] == agreement["rule_version"] for item in agreements) > 1:
+                    raise BusinessError("Overlapping agreements have the same rule version", "AGREEMENT_CONFLICT")
+                commercial_fields = {"unit_price", "contract_price", "tiers", "freight_fixed", "freight_per_unit",
+                                     "additional_cost", "duty_rate", "tax_rate", "moq", "pack_multiple",
+                                     "lead_time_days", "max_quantity", "fx_rate", "fx_date", "fx_source"}
+                offer.update({key: value for key, value in agreement["terms"].items() if key in commercial_fields})
+                offer.update(currency=agreement["currency"], valid_from=agreement["valid_from"],
+                             valid_to=agreement["valid_to"], rule_version=agreement["rule_version"],
+                             data_source=f"commercial_agreement:{agreement['id']}")
+            performance = [item for item in snapshots.get("supplier_performance", [])
+                           if item["supplier_id"] == offer["supplier_id"]]
+            if performance:
+                offer["performance"] = max(performance, key=lambda item: item["period_end"])
+            if offer.get("currency", run.currency) != run.currency:
+                if not all(offer.get(key) for key in ("fx_rate", "fx_date", "fx_source")):
+                    raise BusinessError("Foreign offers require an explicit FX rate, date and source", "FX_SNAPSHOT_REQUIRED")
+            elif Decimal(str(offer.get("fx_rate", 1))) != 1:
+                raise BusinessError("Same-currency offers must use an FX rate of one", "INVALID_FX")
+        rows = self._rows(SKUCheckResult, run_id=run_id, sku_id=sku_id)
+        if not rows:
+            raise BusinessError("SKU not in run", "NOT_FOUND", 404)
+        record = rows[0]
+        for line in self._rows(POLine, result_id=record.id):
+            if self._get(PODraft, line.draft_id).lifecycle_status != "DRAFT":
+                raise BusinessError("Cannot re-source a decision linked to an issued PO", "PO_IMMUTABLE")
+        sourcing_block = record.status == "BLOCKED" and record.raw_order_qty and all(
+            exc.code == "MISSING_SUPPLIER_MAPPING" for exc in self._rows(
+                ExceptionRecord, result_id=record.id, status="OPEN"))
+        if record.status != "REORDER" and not sourcing_block:
+            raise BusinessError("Only a reorder need or supplier-selection block can be sourced",
+                                "SOURCING_NOT_REQUIRED")
+        required_quantity = record.final_order_qty or record.raw_order_qty
+        if request.required_quantity != required_quantity:
+            raise BusinessError("Requested sourcing quantity differs from the current SKU decision",
+                                "VERSION_CONFLICT", 409)
+        trace = rank_suppliers(required_quantity, offers, request.as_of,
+                               request.weights, request.allow_split)
+        existing = self.db.scalar(select(SourcingDecision).where(SourcingDecision.result_id == record.id))
+        if existing:
+            existing.trace, existing.rule_version, existing.created_by = trace, int(trace["rule_version"]), self.actor
+            decision = existing
+        else:
+            decision = SourcingDecision(result_id=record.id, rule_version=int(trace["rule_version"]),
+                                         trace=trace, created_by=self.actor)
+            self.db.add(decision)
+        self.db.flush()
+        if sourcing_block:
+            for exc in self._rows(ExceptionRecord, result_id=record.id, status="OPEN"):
+                exc.status = "SUPERSEDED"
+            record.status = "REORDER"
+            record.final_order_qty = sum(row["quantity"] for row in trace["result"]["allocations"])
+            first_risk = record.evidence["binding_date"] if record.evidence.get("inventory_policy") else next(
+                item["date"] for item in record.evidence["timeline"]
+                if item["projected_stock"] < record.context["sku"]["safety_stock"])
+            record.evidence = {**record.evidence, "need_date": first_risk,
+                               "sourcing_decision_id": decision.id, "sourcing_rule_version": decision.rule_version}
+            record.decision_reason = (
+                f"Projected stock requires {required_quantity} units; supplier allocation selected "
+                f"{record.final_order_qty} units across {len(trace['result']['allocations'])} supplier(s)"
+            )
+            run = self._get(ProcurementRun, run_id, lock=True)
+            self._summary(run)
+        for line in self._rows(POLine, result_id=record.id):
+            draft = self._get(PODraft, line.draft_id)
+            self.db.delete(line)
+            self.db.flush()
+            draft.total = sum((row.amount for row in self._rows(POLine, draft_id=draft.id)), Decimal("0"))
+            self._invalidate(draft, "Supplier allocation changed; regenerate drafts")
+        self.db.flush()
+        return decision
+
+    def _import(self, envelope: SourceEnvelope, filename, idempotency_key=None):
+        raw = envelope.dataset
+        if idempotency_key:
+            existing = self.db.scalar(select(ImportBatch).where(
+                ImportBatch.workspace_id == self.workspace_id,
+                ImportBatch.idempotency_key == idempotency_key,
+            ))
+            if existing:
+                return existing
+        if envelope.external_id:
+            existing = self.db.scalar(select(ImportBatch).where(
+                ImportBatch.workspace_id == self.workspace_id,
+                ImportBatch.source_system == envelope.source_system,
+                ImportBatch.external_id == envelope.external_id,
+            ))
+            if existing:
+                return existing
+        source_fields = dict(source_system=envelope.source_system, external_id=envelope.external_id,
+                             synced_at=envelope.synced_at, source_metadata=envelope.metadata)
         try:
             data, issues = normalize(raw)
         except ValueError as exc:
             batch = ImportBatch(workspace_id=self.workspace_id, filename=filename, status="REJECTED", synthetic=True,
                 raw_data=serial(raw), source_hash=hashlib.sha256(json.dumps(serial(raw), sort_keys=True).encode()).hexdigest(),
-                issues=[{"code": "INVALID_DATASET", "message": str(exc)}])
+                issues=[{"code": "INVALID_DATASET", "message": str(exc)}],
+                idempotency_key=idempotency_key, **source_fields)
             self.db.add(batch)
             self.db.flush()
             return batch
         batch = ImportBatch(workspace_id=self.workspace_id, filename=filename, status="VALIDATED_WITH_ISSUES" if issues else "VALIDATED",
             synthetic=True, raw_data=serial(raw), issues=issues,
-            source_hash=hashlib.sha256(json.dumps(serial(raw), sort_keys=True).encode()).hexdigest())
+            source_hash=hashlib.sha256(json.dumps(serial(raw), sort_keys=True).encode()).hexdigest(),
+            idempotency_key=idempotency_key, **source_fields)
         self.db.add(batch)
         self.db.flush()
         for table, model in TABLE_MODELS.items():
             for row in getattr(data, table):
-                self.db.add(model(batch_id=batch.id, **row.model_dump()))
+                row_external_id = getattr(row, "sku_id", None) or getattr(row, "supplier_id", None)
+                self.db.add(model(batch_id=batch.id, source_system=envelope.source_system,
+                                  external_id=row_external_id, synced_at=envelope.synced_at,
+                                  source_metadata=envelope.metadata, **row.model_dump()))
             self.db.flush()
         return batch
 
     @audited
-    def import_dataset(self, raw: dict, filename="dataset.json"):
-        return self._import(raw, filename)
+    def import_dataset(self, raw: dict, filename="dataset.json", idempotency_key=None):
+        return self._import(JSONAdapter(raw).fetch(), filename, idempotency_key)
 
     @audited
-    def import_files(self, files):
+    def import_files(self, files, idempotency_key=None):
         try:
-            raw = read_files(files)
+            envelope = CSVAdapter(files).fetch()
         except (ValueError, UnicodeError) as exc:
             raise BusinessError(str(exc), "INVALID_UPLOAD", 422) from exc
-        return self._import(raw, ", ".join(name for name, _ in files))
+        return self._import(envelope, ", ".join(name for name, _ in files), idempotency_key)
 
     @audited
     def validate_import(self, batch_id):
@@ -114,7 +352,8 @@ class ProcurementTools:
 
     def _context(self, batch_id, sku):
         def clean(row):
-            return {k: v for k, v in serial(row).items() if k not in {"id", "batch_id"}}
+            source_fields = {"id", "batch_id", "source_system", "external_id", "synced_at", "source_metadata"}
+            return {k: v for k, v in serial(row).items() if k not in source_fields}
         return dict(sku=clean(sku), suppliers=[clean(s) for s in self._rows(Supplier, batch_id=batch_id)],
             commercial=[clean(s) for s in self._rows(SupplierSKU, batch_id=batch_id, sku_id=sku.sku_id)],
             inventory=[clean(s) for s in self._rows(Inventory, batch_id=batch_id, sku_id=sku.sku_id)],
@@ -122,14 +361,58 @@ class ProcurementTools:
             open_po=[clean(s) for s in self._rows(OpenPO, batch_id=batch_id, sku_id=sku.sku_id)])
 
     @audited
-    def create_procurement_run(self, request: RunRequest):
+    def create_procurement_run(self, request: RunRequest, idempotency_key=None):
         batch = self._get(ImportBatch, request.batch_id)
         if not batch.status.startswith("VALIDATED"):
             raise BusinessError("Cannot run a rejected import")
+        if idempotency_key:
+            existing = self.db.scalar(select(ProcurementRun).where(
+                ProcurementRun.batch_id == batch.id,
+                ProcurementRun.idempotency_key == idempotency_key,
+            ))
+            if existing:
+                return existing
         skus = self._rows(SKU, batch_id=batch.id, active=True)
         if not skus:
             raise BusinessError("Import contains no active SKU")
-        run = ProcurementRun(**request.model_dump(), expected_sku_count=len(skus))
+        rule_set = self._active_rules()
+        rule_time = now()
+        matrix_rules = self.db.scalars(select(ApprovalMatrixRule).where(
+            ApprovalMatrixRule.workspace_id == self.workspace_id,
+            ApprovalMatrixRule.effective_from <= rule_time,
+            ApprovalMatrixRule.effective_to.is_(None) | (ApprovalMatrixRule.effective_to > rule_time),
+        ).order_by(ApprovalMatrixRule.sequence, ApprovalMatrixRule.id)).all()
+        matrix_snapshot = [{**rule.conditions, "id": rule.id, "sequence": rule.sequence,
+                            "required_role": rule.required_role, "rule_version": rule.rule_version}
+                           for rule in matrix_rules]
+        inventory_snapshots = {}
+        commercial_snapshots = serial(list(self.db.scalars(select(CommercialAgreement).where(
+            CommercialAgreement.workspace_id == self.workspace_id,
+            CommercialAgreement.valid_from <= request.as_of,
+            CommercialAgreement.valid_to.is_(None) | (CommercialAgreement.valid_to >= request.as_of)))))
+        performance_snapshots = serial(list(self.db.scalars(select(SupplierPerformance).where(
+            SupplierPerformance.workspace_id == self.workspace_id,
+            SupplierPerformance.period_end <= request.as_of))))
+        for inventory_rule in self.db.scalars(select(SKUInventoryPolicy).where(
+                SKUInventoryPolicy.workspace_id == self.workspace_id,
+                SKUInventoryPolicy.effective_from <= rule_time,
+                SKUInventoryPolicy.effective_to.is_(None) | (SKUInventoryPolicy.effective_to > rule_time),
+        ).order_by(SKUInventoryPolicy.rule_version)):
+            previous = inventory_snapshots.get(inventory_rule.sku_id)
+            if previous and previous["rule_version"] == inventory_rule.rule_version:
+                raise BusinessError("Overlapping inventory policies have the same version", "POLICY_CONFLICT")
+            inventory_snapshots[inventory_rule.sku_id] = {
+                **inventory_rule.parameters, "policy_type": inventory_rule.policy_type,
+                "rule_version": inventory_rule.rule_version, "policy_id": inventory_rule.id}
+        run = ProcurementRun(
+            **request.model_dump(), expected_sku_count=len(skus), idempotency_key=idempotency_key,
+            rule_set_id=rule_set.id, rule_version=rule_set.rule_version,
+            rules_snapshot={**rule_set.rules, "run_policy": request.model_dump(mode="json"),
+                            "approval_matrix": matrix_snapshot, "inventory_policies": inventory_snapshots,
+                            "commercial_agreements": commercial_snapshots,
+                            "supplier_performance": performance_snapshots},
+            approval_policy_snapshot=rule_set.approval_policy,
+        )
         self.db.add(run)
         self.db.flush()
         for sku in skus:
@@ -138,7 +421,8 @@ class ProcurementTools:
         return run
 
     def _policy(self, run):
-        return RunRequest(**{k: getattr(run, k) for k in RunRequest.model_fields})
+        snapshot = (run.rules_snapshot or {}).get("run_policy")
+        return RunRequest(**snapshot) if snapshot else RunRequest(**{k: getattr(run, k) for k in RunRequest.model_fields})
 
     def _summary(self, run):
         results = self._rows(SKUCheckResult, run_id=run.id)
@@ -159,6 +443,9 @@ class ProcurementTools:
             version=draft.version, comment=comment, snapshot=self._draft(draft)))
 
     def _invalidate(self, draft, reason):
+        if draft.lifecycle_status != "DRAFT":
+            raise BusinessError("Issued or closed POs cannot be edited; create a new procurement run", "PO_IMMUTABLE")
+        self._release_budget(draft)
         draft.status = "NEEDS_REVIEW"
         draft.reviewer, draft.approved_at = None, None
         draft.finance_reviewer, draft.finance_approved_at = None, None
@@ -166,8 +453,13 @@ class ProcurementTools:
         self._event(draft, "INVALIDATED", reason)
 
     def _evaluate(self, run, result):
+        for line in self._rows(POLine, result_id=result.id):
+            if self._get(PODraft, line.draft_id).lifecycle_status != "DRAFT":
+                raise BusinessError("Cannot rerun a decision linked to an issued PO", "PO_IMMUTABLE")
+        self.db.execute(delete(SourcingDecision).where(SourcingDecision.result_id == result.id))
         previous = serial(result)
-        answer = evaluate(result.context, self._policy(run))
+        answer = evaluate(result.context, self._policy(run),
+                          (run.rules_snapshot or {}).get("inventory_policies", {}).get(result.sku_id))
         for exc in self._rows(ExceptionRecord, result_id=result.id, status="OPEN"):
             exc.status = "SUPERSEDED"
         for key, value in answer.items():
@@ -176,6 +468,7 @@ class ProcurementTools:
         result.revision += 1
         for exc in answer["exceptions"]:
             self.db.add(ExceptionRecord(run_id=run.id, result_id=result.id, **exc))
+            increment("procurement_exceptions_total", code=exc["code"], severity=exc["severity"])
         for line in self._rows(POLine, result_id=result.id):
             draft = self._get(PODraft, line.draft_id)
             self.db.delete(line)
@@ -239,7 +532,8 @@ class ProcurementTools:
         if request.context.sku.sku_id != result.sku_id or not request.context.sku.active:
             raise BusinessError("Cannot change SKU identity or deactivate an affected SKU")
         context = request.context.model_dump(mode="json")
-        answer = evaluate(context, self._policy(run))
+        answer = evaluate(context, self._policy(run),
+                          (run.rules_snapshot or {}).get("inventory_policies", {}).get(result.sku_id))
         if any(e["code"] == exc.code and e["required_field"] == exc.required_field for e in answer["exceptions"]):
             raise BusinessError("Correction does not resolve the selected exception", "UNRESOLVED_EXCEPTION")
         before = result.context
@@ -271,18 +565,15 @@ class ProcurementTools:
         return {"result": serial(result), "before": before, "reason": request.reason}
 
     def _draft(self, draft):
-        workspace = self.db.get(Workspace, self.workspace_id)
-        if workspace is None:
-            raise BusinessError("Workspace not found", "NOT_FOUND", 404)
+        run = self._get(ProcurementRun, draft.run_id)
         obj = serial(draft)
+        for field in ("total", "tax", "freight", "duty", "landed_cost"):
+            obj[field] = format(Decimal(str(obj.get(field) or 0)), ".2f")
         obj["po_number"] = f"PO-{draft.id}"
         obj["tax_treatment"] = "PRE_TAX"
         obj["synthetic"] = True
         obj["requires_finance_review"] = self._requires_finance(draft)
-        obj["approval_policy"] = {
-            "currency": workspace.currency,
-            "finance_threshold": str(workspace.finance_threshold),
-        }
+        obj["approval_policy"] = run.approval_policy_snapshot
         obj["approval_stage"] = (
             "COMPLETE" if draft.status == "APPROVED" else
             "FINANCE" if draft.status == "FINANCE_REVIEW" else "PURCHASING"
@@ -291,10 +582,15 @@ class ProcurementTools:
         return obj
 
     def _requires_finance(self, draft):
+        run = self._get(ProcurementRun, draft.run_id) if getattr(draft, "run_id", None) else None
         workspace = self.db.get(Workspace, self.workspace_id)
-        if workspace is None:
-            raise BusinessError("Workspace not found", "NOT_FOUND", 404)
-        return draft.currency == workspace.currency and draft.total >= workspace.finance_threshold
+        policy = (run.approval_policy_snapshot if run else None) or {
+            "currency": workspace.currency, "finance_threshold": str(workspace.finance_threshold)
+        }
+        currency = policy.get("currency", run.currency if run else workspace.currency)
+        threshold = Decimal(str(policy.get("finance_threshold", "5000")))
+        value = getattr(draft, "landed_cost", None) or draft.total
+        return (getattr(draft, "base_currency", None) or draft.currency) == currency and value >= threshold
 
     @audited
     def generate_po_drafts(self, run_id):
@@ -305,25 +601,67 @@ class ProcurementTools:
             if self._rows(POLine, result_id=result.id):
                 continue
             evidence = result.evidence
-            supplier_id = evidence["supplier_id"]
-            drafts = self._rows(PODraft, run_id=run_id, supplier_id=supplier_id)
-            if drafts:
-                draft = drafts[0]
-                self._invalidate(draft, "Added newly evaluated source line")
+            sourcing = self.db.scalar(select(SourcingDecision).where(SourcingDecision.result_id == result.id))
+            if sourcing:
+                offers = {offer["supplier_id"]: offer for offer in sourcing.trace["inputs"]["offers"]}
+                allocations = [{"supplier_id": row["supplier_id"], "quantity": row["quantity"],
+                                "offer": offers[row["supplier_id"]], "cost": row["cost"],
+                                "unit_price": row["cost"]["intermediate"]["unit_price"],
+                                "lead_time_days": offers[row["supplier_id"]].get("lead_time_days", 0),
+                                "supplier_name": offers[row["supplier_id"]].get("supplier_name", row["supplier_id"])}
+                               for row in sourcing.trace["result"]["allocations"]]
             else:
+                supplier_id = evidence["supplier_id"]
                 supplier = next(s for s in result.context["suppliers"] if s["supplier_id"] == supplier_id)
-                draft = PODraft(run_id=run_id, supplier_id=supplier_id, supplier_name=supplier["supplier_name"],
-                    currency=run.currency, warehouse=run.warehouse, order_date=run.as_of)
-                self.db.add(draft)
+                allocations = [{"supplier_id": supplier_id, "quantity": result.final_order_qty,
+                                "unit_price": evidence["unit_price"], "supplier_name": supplier["supplier_name"],
+                                "expected_delivery_date": evidence["expected_delivery_date"]}]
+            for allocation in allocations:
+                drafts = self._rows(PODraft, run_id=run_id, supplier_id=allocation["supplier_id"])
+                if drafts:
+                    draft = drafts[0]
+                    if draft.currency != allocation.get("offer", {}).get("currency", run.currency):
+                        raise BusinessError("A supplier PO cannot mix transaction currencies", "CURRENCY_CONFLICT")
+                    self._invalidate(draft, "Added newly evaluated source line")
+                else:
+                    draft = PODraft(run_id=run_id, supplier_id=allocation["supplier_id"],
+                        supplier_name=allocation["supplier_name"], currency=allocation.get("offer", {}).get("currency", run.currency),
+                        warehouse=run.warehouse, order_date=run.as_of, base_currency=run.currency,
+                        exchange_rate=Decimal("1"), exchange_rate_date=run.as_of,
+                        exchange_rate_source="same-currency")
+                    self.db.add(draft)
+                    self.db.flush()
+                qty, price = allocation["quantity"], Decimal(str(allocation["unit_price"]))
+                expected = allocation.get("expected_delivery_date") or (
+                    run.as_of + timedelta(days=int(allocation["lead_time_days"]))).isoformat()
+                self.db.add(POLine(draft_id=draft.id, result_id=result.id, result_revision=result.revision,
+                    sku_id=result.sku_id, description=result.context["sku"]["description"],
+                    uom=result.context["sku"]["uom"], quantity=qty, unit_price=price,
+                    amount=amount(qty, price), open_quantity=qty,
+                    need_date=date.fromisoformat(evidence["need_date"]),
+                    expected_delivery_date=date.fromisoformat(expected)))
                 self.db.flush()
-            qty, price = result.final_order_qty, Decimal(evidence["unit_price"])
-            self.db.add(POLine(draft_id=draft.id, result_id=result.id, result_revision=result.revision,
-                sku_id=result.sku_id, description=result.context["sku"]["description"], uom=result.context["sku"]["uom"],
-                quantity=qty, unit_price=price, amount=amount(qty, price),
-                need_date=date.fromisoformat(evidence["need_date"]),
-                expected_delivery_date=date.fromisoformat(evidence["expected_delivery_date"])))
-            self.db.flush()
-            draft.total = sum((r.amount for r in self._rows(POLine, draft_id=draft.id)), Decimal(0))
+                draft.total = sum((r.amount for r in self._rows(POLine, draft_id=draft.id)), Decimal(0))
+                if "cost" in allocation:
+                    offer = allocation["offer"]
+                    rate = Decimal(str(offer.get("fx_rate", 1)))
+                    if draft.exchange_rate is not None and draft.exchange_rate != rate:
+                        raise BusinessError("A supplier PO cannot mix FX snapshots", "FX_CONFLICT")
+                    draft.base_currency, draft.exchange_rate = run.currency, rate
+                    draft.exchange_rate_date = date.fromisoformat(offer.get("fx_date", run.as_of.isoformat()))
+                    draft.exchange_rate_source = offer.get("fx_source", "same-currency")
+                draft.tax = draft.freight = draft.duty = Decimal("0")
+                for priced_line in self._rows(POLine, draft_id=draft.id):
+                    decision = self.db.scalar(select(SourcingDecision).where(
+                        SourcingDecision.result_id == priced_line.result_id))
+                    if decision:
+                        priced = next(item for item in decision.trace["result"]["allocations"]
+                                      if item["supplier_id"] == draft.supplier_id)["cost"]["intermediate"]
+                        draft.tax += Decimal(priced["tax"])
+                        draft.freight += Decimal(priced["freight"]) + Decimal(priced["additional_cost"])
+                        draft.duty += Decimal(priced["duty"])
+                draft.landed_cost = ((draft.total + draft.tax + draft.freight + draft.duty) *
+                                     (draft.exchange_rate or Decimal(1))).quantize(Decimal("0.01"))
         return [self._draft(d) for d in self._rows(PODraft, run_id=run_id)]
 
     @audited
@@ -416,7 +754,8 @@ class ProcurementTools:
             for commercial in context["commercial"]:
                 if commercial.get("lead_time_days") is not None:
                     commercial["lead_time_days"] = max(0, commercial["lead_time_days"] + request.lead_time_delta_days)
-            answer = evaluate(context, policy)
+            answer = evaluate(context, policy,
+                              (run.rules_snapshot or {}).get("inventory_policies", {}).get(result.sku_id))
             simulated.append(answer)
             if result.revision > 0 and (result.status != answer["status"] or result.final_order_qty != answer["final_order_qty"]):
                 changes.append({"sku_id": result.sku_id, "before_status": result.status,
@@ -452,11 +791,14 @@ class ProcurementTools:
         if line.draft_id != draft_id:
             raise BusinessError("Line is not in this draft", "NOT_FOUND", 404)
         result = self._get(SKUCheckResult, line.result_id)
+        if self.db.scalar(select(SourcingDecision.id).where(SourcingDecision.result_id == result.id)):
+            raise BusinessError("Re-run supplier sourcing to change an allocated line", "SOURCING_RECALC_REQUIRED")
         qty = request.quantity if request.quantity is not None else line.quantity
         price = request.unit_price if request.unit_price is not None else line.unit_price
         if qty < result.evidence["moq"] or qty % result.evidence["pack_multiple"]:
             raise BusinessError("Edited quantity violates MOQ or pack multiple")
         line.quantity, line.unit_price, line.amount = qty, price, amount(qty, price)
+        line.open_quantity = qty - line.received_quantity + line.returned_quantity
         self.db.flush()
         draft.total = sum((r.amount for r in self._rows(POLine, draft_id=draft_id)), Decimal(0))
         self._invalidate(draft, request.reason)
@@ -469,19 +811,138 @@ class ProcurementTools:
             raise BusinessError("Cannot approve/export an empty PO")
         for line in lines:
             result = self._get(SKUCheckResult, line.result_id)
-            checked = evaluate(result.context, self._policy(run))
-            if result.status != "REORDER" or result.revision != line.result_revision or checked["status"] != "REORDER":
+            checked = evaluate(result.context, self._policy(run),
+                               (run.rules_snapshot or {}).get("inventory_policies", {}).get(result.sku_id))
+            sourcing = self.db.scalar(select(SourcingDecision).where(SourcingDecision.result_id == result.id))
+            source_only_block = sourcing and checked["status"] == "BLOCKED" and checked["raw_order_qty"] and all(
+                exc["code"] == "MISSING_SUPPLIER_MAPPING" for exc in checked["exceptions"])
+            if (result.status != "REORDER" or result.revision != line.result_revision or
+                    (checked["status"] != "REORDER" and not source_only_block)):
                 raise BusinessError("Source decision is blocked or superseded")
-            if checked["evidence"]["supplier_id"] != draft.supplier_id or draft.currency != run.currency:
-                raise BusinessError("Supplier/currency differs from approved default mapping")
+            if sourcing:
+                offer = next((item for item in sourcing.trace["inputs"]["offers"]
+                              if item["supplier_id"] == draft.supplier_id), None)
+                allocation = next((item for item in sourcing.trace["result"]["allocations"]
+                                   if item["supplier_id"] == draft.supplier_id), None)
+                if not offer or not allocation or draft.currency != run.currency:
+                    raise BusinessError("Supplier allocation differs from the approved sourcing decision")
+                moq, pack = int(offer.get("moq", 0)), int(offer.get("pack_multiple", 1))
+                selected_price = Decimal(allocation["cost"]["intermediate"]["unit_price"])
+                if line.quantity != allocation["quantity"] or line.unit_price != selected_price:
+                    raise BusinessError("PO line differs from the approved sourcing allocation")
+            else:
+                if checked["evidence"]["supplier_id"] != draft.supplier_id or draft.currency != run.currency:
+                    raise BusinessError("Supplier/currency differs from approved default mapping")
+                moq, pack = checked["evidence"]["moq"], checked["evidence"]["pack_multiple"]
             if any(e.severity == "BLOCKING" for e in self._rows(ExceptionRecord, result_id=result.id, status="OPEN")):
                 raise BusinessError("Unresolved blocking exception on PO line")
-            if line.quantity <= 0 or line.unit_price <= 0 or line.quantity < checked["evidence"]["moq"] or line.quantity % checked["evidence"]["pack_multiple"]:
+            if line.quantity <= 0 or line.unit_price <= 0 or line.quantity < moq or line.quantity % pack:
                 raise BusinessError("Invalid quantity, price, MOQ or pack multiple")
             if line.amount != amount(line.quantity, line.unit_price):
                 raise BusinessError("Stored line amount does not recompute", "PO_AMOUNT_MISMATCH")
         if draft.total != sum((r.amount for r in lines), Decimal(0)):
             raise BusinessError("Stored PO total does not recompute", "PO_AMOUNT_MISMATCH")
+        if draft.budget_code:
+            budget = self.db.scalar(select(Budget).where(
+                Budget.workspace_id == self.workspace_id, Budget.budget_code == draft.budget_code,
+                Budget.currency == (draft.base_currency or draft.currency)))
+            if not budget:
+                raise BusinessError("Referenced budget does not exist in the PO base currency", "BUDGET_NOT_FOUND")
+            commitment = draft.landed_cost or draft.total
+            already_committed = self._budget_commitment(draft) is not None
+            if not already_committed and budget.committed_amount + commitment > budget.authorized_amount:
+                raise BusinessError("PO exceeds available budget", "BUDGET_EXCEEDED")
+        plan = self.approval_plan(draft.id)
+        approved_rules = self._approved_matrix_rules(draft)
+        pending = [step for step in plan["result"]["steps"] if step["rule_id"] not in approved_rules]
+        if pending:
+            raise BusinessError("Configured approval matrix steps remain incomplete", "APPROVAL_MATRIX_REQUIRED")
+
+    def _budget_commitment(self, draft):
+        events = self._rows(ApprovalEvent, draft_id=draft.id)
+        released = {event.snapshot.get("released_commitment_id") for event in events
+                    if event.action == "BUDGET_RELEASED"}
+        return next((event for event in events if event.action == "BUDGET_COMMITTED" and event.id not in released), None)
+
+    def _release_budget(self, draft):
+        committed = self._budget_commitment(draft)
+        if committed is None:
+            return
+        snapshot = committed.snapshot
+        budget = self.db.scalar(select(Budget).where(
+            Budget.workspace_id == self.workspace_id, Budget.budget_code == snapshot["budget_code"],
+            Budget.currency == (snapshot.get("base_currency") or snapshot["currency"])).with_for_update())
+        value = Decimal(snapshot.get("landed_cost") or snapshot["total"])
+        if budget is None or budget.committed_amount < value:
+            raise BusinessError("Budget commitment requires reconciliation", "BUDGET_INCONSISTENT")
+        budget.committed_amount -= value
+        self.db.add(ApprovalEvent(draft_id=draft.id, action="BUDGET_RELEASED", actor=self.actor,
+            version=draft.version, comment="Released prior PO commitment",
+            snapshot={"released_commitment_id": committed.id, "amount": str(value)}))
+        self.db.flush()
+
+    def _commit_budget(self, draft):
+        if not draft.budget_code or self._budget_commitment(draft) is not None:
+            return
+        budget = self.db.scalar(select(Budget).where(
+            Budget.workspace_id == self.workspace_id, Budget.budget_code == draft.budget_code,
+            Budget.currency == (draft.base_currency or draft.currency)).with_for_update())
+        if not budget:
+            raise BusinessError("Referenced budget does not exist", "BUDGET_NOT_FOUND")
+        commitment = draft.landed_cost or draft.total
+        if budget.committed_amount + commitment > budget.authorized_amount:
+            raise BusinessError("PO exceeds available budget", "BUDGET_EXCEEDED")
+        budget.committed_amount += commitment
+        self._event(draft, "BUDGET_COMMITTED", f"Committed {commitment} {budget.currency} to {budget.budget_code}")
+
+    def _approved_matrix_rules(self, draft):
+        events = self._rows(ApprovalEvent, draft_id=draft.id)
+        last_invalidation = max((event.version for event in events if event.action in {"INVALIDATED", "REJECTED"}), default=0)
+        return {event.snapshot.get("matrix_rule_id") for event in events
+                if event.action == "MATRIX_APPROVED" and event.version >= last_invalidation}
+
+    def approval_plan(self, draft_id):
+        draft = self._get(PODraft, draft_id)
+        current = now()
+        run = self._get(ProcurementRun, draft.run_id)
+        rule_payload = (run.rules_snapshot or {}).get("approval_matrix", [])
+        delegations = list(self.db.scalars(select(ApprovalDelegation).where(
+            ApprovalDelegation.workspace_id == self.workspace_id,
+            ApprovalDelegation.valid_from <= current, ApprovalDelegation.valid_to >= current)))
+        risk = "HIGH" if any(e.severity == "BLOCKING" for e in self._rows(
+            ExceptionRecord, run_id=draft.run_id, status="OPEN")) else "NORMAL"
+        delegation_payload = [{"id": item.id, "delegator_role": item.delegator_role,
+                               "delegate_role": item.delegate_role,
+                               "delegator_user_id": item.delegator_user_id,
+                               "delegate_user_id": item.delegate_user_id,
+                               "valid_from": item.valid_from.isoformat(), "valid_to": item.valid_to.isoformat()}
+                              for item in delegations]
+        return resolve_approval_steps(
+            {"amount": str(draft.landed_cost or draft.total), "cost_center": draft.cost_center,
+             "supplier_id": draft.supplier_id, "risk_level": risk,
+             "rule_version": max((rule["rule_version"] for rule in rule_payload), default=1)},
+            rule_payload, delegation_payload, current)
+
+    @audited
+    def matrix_approve(self, draft_id, request):
+        self._human(self.role)
+        draft = self._locked_draft(draft_id)
+        self._version(draft, request.expected_version)
+        plan = self.approval_plan(draft.id)
+        approved = self._approved_matrix_rules(draft)
+        pending = [step for step in plan["result"]["steps"] if step["rule_id"] not in approved]
+        if not pending:
+            raise BusinessError("Approval matrix is already complete", "ALREADY_APPROVED")
+        step = pending[0]
+        if self.role not in {step["required_role"], step["acting_role"], "owner", "admin"}:
+            raise BusinessError("The next approval matrix step requires another role", "FORBIDDEN", 403)
+        if step["delegated"] and step.get("delegate_user_id") and self.role not in {"owner", "admin"}:
+            if self.user_id != step["delegate_user_id"]:
+                raise BusinessError("This delegated approval belongs to another user", "FORBIDDEN", 403)
+        self.db.add(ApprovalEvent(draft_id=draft.id, action="MATRIX_APPROVED", actor=self.actor,
+            version=draft.version, comment=request.comment,
+            snapshot={"matrix_rule_id": step["rule_id"], "step": step, "draft": self._draft(draft)}))
+        return {"approved_step": step, "plan": plan}
 
     @audited
     def approve_po(self, draft_id, request: Review):
@@ -496,6 +957,8 @@ class ProcurementTools:
         draft.status = "FINANCE_REVIEW" if self._requires_finance(draft) else "APPROVED"
         draft.version += 1
         self._event(draft, "PURCHASING_APPROVED" if draft.status == "FINANCE_REVIEW" else "APPROVED", request.comment)
+        if draft.status == "APPROVED":
+            self._commit_budget(draft)
         return self._draft(draft)
 
     @audited
@@ -512,6 +975,7 @@ class ProcurementTools:
         draft.finance_reviewer, draft.finance_approved_at = self.actor, now()
         draft.version += 1
         self._event(draft, "FINANCE_APPROVED", request.comment)
+        self._commit_budget(draft)
         return self._draft(draft)
 
     @audited
@@ -520,6 +984,9 @@ class ProcurementTools:
         required_role = "finance" if draft.status == "FINANCE_REVIEW" else "purchasing"
         self._human(required_role)
         self._version(draft, request.expected_version)
+        if draft.lifecycle_status != "DRAFT":
+            raise BusinessError("An issued PO cannot be rejected as a draft", "PO_IMMUTABLE")
+        self._release_budget(draft)
         if self.role == "finance" and draft.status != "FINANCE_REVIEW":
             raise BusinessError("Finance can reject only drafts awaiting Finance review")
         draft.status, draft.reviewer, draft.approved_at = "REJECTED", None, None
@@ -551,6 +1018,148 @@ class ProcurementTools:
             writer.writerow(row)
         self._event(draft, "EXPORTED", "Approved pre-tax synthetic PO exported as CSV")
         return {"filename": f"PO-{draft.id}.csv", "content": output.getvalue(), "document": document}
+
+    @audited
+    def set_finance_dimensions(self, draft_id, request):
+        draft = self._locked_draft(draft_id)
+        if draft.status == "APPROVED":
+            raise BusinessError("Finance dimensions must be fixed before final approval", "APPROVED_IMMUTABLE")
+        for key, value in request.model_dump().items():
+            setattr(draft, key, value)
+        draft.landed_cost = ((draft.total + draft.tax + draft.freight + draft.duty) *
+                             draft.exchange_rate).quantize(Decimal("0.01"))
+        self._invalidate(draft, "Finance dimensions or exchange-rate snapshot changed")
+        return self._draft(draft)
+
+    @audited
+    def transition_po_lifecycle(self, draft_id, target_status, reason):
+        self._human()
+        draft = self._locked_draft(draft_id)
+        if target_status in {"PARTIALLY_RECEIVED", "RECEIVED", "RETURNED"}:
+            raise BusinessError("Record a goods receipt or return to update quantities and receipt status", "RECEIPT_REQUIRED")
+        if target_status == "SENT" and draft.status != "APPROVED":
+            raise BusinessError("Only an approved PO may be sent", "APPROVAL_REQUIRED")
+        if target_status == "CANCELLED" and (
+                any(line.received_quantity for line in self._rows(POLine, draft_id=draft.id)) or
+                self._rows(SupplierInvoice, draft_id=draft.id)):
+            raise BusinessError("Received or invoiced POs require financial reconciliation before cancellation",
+                                "RECONCILIATION_REQUIRED")
+        draft.lifecycle_status = transition_po(draft.lifecycle_status, target_status)
+        if target_status == "CANCELLED":
+            self._release_budget(draft)
+        self._event(draft, f"LIFECYCLE_{target_status}", reason)
+        return self._draft(draft)
+
+    @audited
+    def record_goods_receipt(self, draft_id, request):
+        draft = self._locked_draft(draft_id)
+        existing = self.db.scalar(select(GoodsReceipt).where(
+            GoodsReceipt.workspace_id == self.workspace_id, GoodsReceipt.external_id == request.external_id))
+        if existing:
+            if existing.draft_id != draft.id:
+                raise BusinessError("Receipt external ID is already linked to another PO", "DUPLICATE_EXTERNAL_ID")
+            expected = sorted((line.po_line_id, line.quantity, line.rejected_quantity, line.returned_quantity)
+                              for line in request.lines)
+            recorded = sorted((line.po_line_id, line.quantity, line.rejected_quantity, line.returned_quantity)
+                              for line in self._rows(GoodsReceiptLine, receipt_id=existing.id))
+            if expected != recorded:
+                raise BusinessError("Receipt reference was already used with different quantities", "IDEMPOTENCY_CONFLICT", 409)
+            return existing
+        if draft.lifecycle_status not in {"SENT", "DELAYED", "PARTIALLY_RECEIVED", "RECEIVED", "RETURNED"}:
+            raise BusinessError("PO must be sent before receipt", "INVALID_PO_LIFECYCLE")
+        receipt = GoodsReceipt(workspace_id=self.workspace_id, draft_id=draft.id,
+            external_id=request.external_id, received_at=request.received_at, created_by=self.actor)
+        self.db.add(receipt)
+        self.db.flush()
+        for submitted in request.lines:
+            line = self._get(POLine, submitted.po_line_id, lock=True)
+            if line.draft_id != draft.id:
+                raise BusinessError("Receipt line does not belong to PO", "REFERENCE_MISMATCH")
+            accepted = submitted.quantity - submitted.rejected_quantity
+            if accepted < 0:
+                raise BusinessError("Rejected quantity exceeds receipt quantity", "INVALID_RECEIPT")
+            try:
+                result = apply_receipt(line.quantity, line.received_quantity, accepted,
+                                       line.returned_quantity, submitted.returned_quantity)
+            except ValueError as exc:
+                raise BusinessError(str(exc), "INVALID_RECEIPT") from exc
+            line.received_quantity = result["intermediate"]["received_total"]
+            line.returned_quantity = result["intermediate"]["returned_total"]
+            line.open_quantity = result["result"]["open_quantity"]
+            self.db.add(GoodsReceiptLine(receipt_id=receipt.id, po_line_id=line.id, sku_id=line.sku_id,
+                quantity=submitted.quantity, rejected_quantity=submitted.rejected_quantity,
+                returned_quantity=submitted.returned_quantity))
+        lines = self._rows(POLine, draft_id=draft.id)
+        draft.lifecycle_status = "RECEIVED" if all(line.open_quantity == 0 for line in lines) else "PARTIALLY_RECEIVED"
+        if any(line.returned_quantity for line in lines) and all(
+                line.received_quantity == line.returned_quantity for line in lines):
+            draft.lifecycle_status = "RETURNED"
+        self._event(draft, f"LIFECYCLE_{draft.lifecycle_status}", f"Goods receipt {request.external_id}")
+        return receipt
+
+    @audited
+    def record_and_match_invoice(self, draft_id, request):
+        draft = self._locked_draft(draft_id)
+        existing = self.db.scalar(select(SupplierInvoice).where(
+            SupplierInvoice.workspace_id == self.workspace_id,
+            SupplierInvoice.supplier_id == request.supplier_id,
+            SupplierInvoice.invoice_number == request.invoice_number))
+        if existing:
+            if existing.draft_id != draft.id:
+                raise BusinessError("Invoice number is already linked to another PO", "DUPLICATE_EXTERNAL_ID")
+            expected = sorted((line.po_line_id, line.sku_id, line.quantity, line.unit_price) for line in request.lines)
+            recorded = sorted((line.po_line_id, line.sku_id, line.quantity, line.unit_price)
+                              for line in self._rows(SupplierInvoiceLine, invoice_id=existing.id))
+            if expected != recorded or request.currency != existing.currency or request.exchange_rate != existing.exchange_rate:
+                raise BusinessError("Invoice reference was already used with different values", "IDEMPOTENCY_CONFLICT", 409)
+            return {**serial(existing), "matches": serial(self._rows(MatchResult, invoice_id=existing.id))}
+        if request.supplier_id != draft.supplier_id or request.currency != draft.currency:
+            raise BusinessError("Invoice supplier or currency differs from PO", "REFERENCE_MISMATCH")
+        run = self._get(ProcurementRun, draft.run_id)
+        tolerances = (run.rules_snapshot or {}).get("matching_tolerances", {})
+        quantity_tolerance = int(tolerances.get("quantity", 0))
+        price_tolerance = Decimal(str(tolerances.get("price_percent", 0)))
+        if request.quantity_tolerance != quantity_tolerance or request.price_tolerance_percent != price_tolerance:
+            raise BusinessError("Invoice tolerances must match the run's frozen policy", "TOLERANCE_POLICY_MISMATCH")
+        total = sum((amount(line.quantity, line.unit_price) for line in request.lines), Decimal("0"))
+        invoice = SupplierInvoice(workspace_id=self.workspace_id, draft_id=draft.id,
+            supplier_id=request.supplier_id, invoice_number=request.invoice_number,
+            invoice_date=request.invoice_date, currency=request.currency,
+            exchange_rate=request.exchange_rate, exchange_rate_date=request.exchange_rate_date,
+            exchange_rate_source=request.exchange_rate_source, total=total)
+        self.db.add(invoice)
+        self.db.flush()
+        has_exception = False
+        for submitted in request.lines:
+            line = self._get(POLine, submitted.po_line_id)
+            if line.draft_id != draft.id or line.sku_id != submitted.sku_id:
+                raise BusinessError("Invoice line does not reference the PO line", "REFERENCE_MISMATCH")
+            previous_lines = self.db.scalars(select(SupplierInvoiceLine).join(SupplierInvoice).where(
+                SupplierInvoice.workspace_id == self.workspace_id,
+                SupplierInvoiceLine.po_line_id == line.id)).all()
+            previously_invoiced = sum(row.quantity for row in previous_lines)
+            self.db.add(SupplierInvoiceLine(invoice_id=invoice.id, po_line_id=line.id,
+                sku_id=line.sku_id, quantity=submitted.quantity, unit_price=submitted.unit_price,
+                amount=amount(submitted.quantity, submitted.unit_price)))
+            receipts = self.db.execute(select(GoodsReceiptLine).join(GoodsReceipt).where(
+                GoodsReceipt.workspace_id == self.workspace_id, GoodsReceiptLine.po_line_id == line.id,
+                GoodsReceipt.status == "POSTED")).scalars().all()
+            trace = three_way_match(
+                {"line_id": line.id, "po_number": f"PO-{draft.id}", "sku_id": line.sku_id,
+                 "quantity": line.quantity, "unit_price": str(line.unit_price),
+                 "previously_invoiced_quantity": previously_invoiced},
+                [{"po_line_id": row.po_line_id, "quantity": row.quantity - row.rejected_quantity - row.returned_quantity}
+                 for row in receipts],
+                {"po_number": f"PO-{draft.id}", "sku_id": submitted.sku_id,
+                 "quantity": submitted.quantity, "unit_price": str(submitted.unit_price)},
+                {"quantity": quantity_tolerance,
+                 "price_percent": str(price_tolerance), "rule_version": run.rule_version})
+            has_exception |= trace["result"]["status"] == "EXCEPTION"
+            self.db.add(MatchResult(invoice_id=invoice.id, po_line_id=line.id,
+                                    status=trace["result"]["status"], rule_version=run.rule_version, trace=trace))
+        invoice.status = "MATCH_EXCEPTION" if has_exception else "MATCHED"
+        self.db.flush()
+        return {**serial(invoice), "matches": serial(self._rows(MatchResult, invoice_id=invoice.id))}
 
     @audited
     def list_resources(self, kind, limit=100, offset=0):

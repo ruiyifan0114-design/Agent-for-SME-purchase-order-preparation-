@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import re
 from time import monotonic
-from pathlib import Path
 from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -186,12 +185,7 @@ PRICE_RE = re.compile(
 
 def _provider_key() -> str:
     cfg = settings()
-    if cfg.deepseek_api_key.strip():
-        return cfg.deepseek_api_key.strip()
-    key_file = Path(cfg.deepseek_key_file)
-    if key_file.is_file():
-        return key_file.read_text(encoding="utf-8").strip()
-    return ""
+    return cfg.deepseek_api_key.strip()
 
 
 def classify(text: str) -> str:
@@ -269,16 +263,27 @@ def _require_run(request: MessageRequest) -> str:
 def _tool_result(tools, request: MessageRequest, name: str, args: dict, navigation: dict) -> object:
     run_id = request.run_id
     if name == "get_procurement_rules":
+        policy = None
+        version = None
+        if run_id:
+            run = tools.get_run_summary(run_id)
+            policy, version = run.get("approval_policy_snapshot") or {}, run.get("rule_version")
+        else:
+            active = tools._active_rules()
+            policy, version = active.approval_policy, active.rule_version
+        currency = policy.get("currency", "workspace currency")
+        threshold = policy.get("finance_threshold", "configured threshold")
         return {
             "source": "workspace decision rules",
+            "rule_version": version,
             "rules": [
                 "Stored inventory, demand, open PO, approved supplier mapping, currency, price, MOQ, pack multiple, and lead time are evidence.",
                 "Missing or stale required evidence blocks a decision; the model must not guess it.",
                 "Order quantities respect safety or target stock, MOQ, and pack multiple.",
                 "What-if scenarios are read-only and never alter a run or PO draft.",
                 "Only an authenticated human can correct evidence, edit, approve, reject, or export a PO.",
-                "For SGD PO drafts below 5,000, Purchasing Manager approval is sufficient.",
-                "For SGD PO drafts of 5,000 or above, Purchasing Manager approval must be followed by Finance Manager review before export.",
+                f"For {currency} PO drafts below {threshold}, Purchasing Manager approval is sufficient.",
+                f"For {currency} PO drafts of {threshold} or above, Purchasing Manager approval must be followed by Finance Manager review before export.",
             ],
         }
     if name == "open_workspace_page":

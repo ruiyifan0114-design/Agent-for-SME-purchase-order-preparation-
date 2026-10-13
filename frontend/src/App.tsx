@@ -1078,15 +1078,15 @@ export default function App() {
     const client = supabase
     if (!cloudAuthEnabled || !client) return
     const applySession = (session: Session | null) => {
+      const demo = savedDemoSession()
+      if (demo) {
+        setAccessToken(demo.accessToken)
+        setUser(demo.user)
+        setWorkspace(true)
+        setAuthReady(true)
+        return
+      }
       if (!session) {
-        const demo = savedDemoSession()
-        if (demo) {
-          setAccessToken(demo.accessToken)
-          setUser(demo.user)
-          setWorkspace(true)
-          setAuthReady(true)
-          return
-        }
         setAccessToken('')
         setUser(null)
         setWorkspace(false)

@@ -11,12 +11,16 @@ from backend.api.routes import router
 from backend.config import settings
 from backend.db.session import engine
 from backend.tools.runtime import BusinessError
+from backend.observability import metrics_snapshot, request_context
 
 app = FastAPI(title="Synthetic SME Procurement Agent", version="0.1.0",
               description="Deterministic procurement with explicit human review. All data is synthetic.")
 app.add_middleware(CORSMiddleware, allow_origins=settings().cors_origins,
                    allow_methods=["GET", "POST", "PATCH", "DELETE"],
-                   allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID"])
+                   allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID",
+                                  "X-Correlation-ID", "Idempotency-Key"],
+                   expose_headers=["X-Correlation-ID"])
+app.middleware("http")(request_context)
 app.include_router(router)
 
 
@@ -52,6 +56,13 @@ def ready():
     with engine.connect() as connection:
         connection.execute(text("SELECT version_num FROM alembic_version"))
     return {"data": {"status": "ready"}}
+
+
+@app.get("/metrics")
+def metrics():
+    if not settings().metrics_enabled:
+        raise BusinessError("Metrics endpoint is disabled", "NOT_FOUND", 404)
+    return {"data": metrics_snapshot()}
 
 
 # The built hash-routed frontend can share one origin with the REST API.

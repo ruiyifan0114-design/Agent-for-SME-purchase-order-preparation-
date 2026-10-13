@@ -9,6 +9,9 @@ export interface Run {
   warehouse: string
   inventory_max_age_days: number
   commercial_max_age_days: number
+  rule_version?: number
+  rules_snapshot?: Record<string, unknown>
+  approval_policy_snapshot?: Record<string, unknown>
   expected_sku_count: number
   processed_count: number
   reorder_count: number
@@ -130,6 +133,9 @@ export interface Line {
   amount: string
   need_date: string
   expected_delivery_date: string
+  received_quantity?: number
+  returned_quantity?: number
+  open_quantity?: number
 }
 export interface Draft {
   id: string
@@ -149,6 +155,18 @@ export interface Draft {
   finance_approved_at: string | null
   requires_finance_review: boolean
   approval_stage: 'PURCHASING' | 'FINANCE' | 'COMPLETE'
+  lifecycle_status?: 'DRAFT' | 'SENT' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'DELAYED' | 'CANCELLED' | 'RETURNED'
+  cost_center?: string | null
+  project_code?: string | null
+  budget_code?: string | null
+  tax?: string
+  freight?: string
+  duty?: string
+  landed_cost?: string
+  base_currency?: string | null
+  exchange_rate?: string | null
+  exchange_rate_date?: string | null
+  exchange_rate_source?: string | null
   lines: Line[]
 }
 export interface Batch {

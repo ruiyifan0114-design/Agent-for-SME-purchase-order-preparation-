@@ -70,3 +70,25 @@ def test_concurrent_generation_single_draft_per_supplier(db, t, start):
         responses = list(pool.map(lambda _: generate(), range(2)))
     assert {d["id"] for d in responses[0]} == {d["id"] for d in responses[1]}
     assert sum(len(d["lines"]) for d in t.generate_po_drafts(run)) == 9
+
+
+@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="PostgreSQL row-lock integration test")
+def test_concurrent_approval_accepts_only_one_version(db, t, start):
+    run = start()
+    draft = t.generate_po_drafts(run)[0]
+    engine = db.get_bind()
+
+    def approve():
+        try:
+            with Session(engine) as session:
+                tool = ProcurementTools(session, actor="Concurrent reviewer", human=True, role="owner")
+                result = tool.approve_po(
+                    draft["id"], Review(expected_version=draft["version"], comment="Reviewed", confirm=True)
+                )
+                return result["status"]
+        except Exception as exc:
+            return type(exc).__name__
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: approve(), range(2)))
+    assert sum(outcome in {"APPROVED", "FINANCE_REVIEW"} for outcome in outcomes) == 1

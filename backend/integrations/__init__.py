@@ -1,0 +1,1 @@
+"""External procurement source adapters."""

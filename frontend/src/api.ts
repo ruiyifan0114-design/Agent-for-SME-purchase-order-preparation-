@@ -221,6 +221,16 @@ export const api = {
       'finance',
     ),
   export: (id: string) => request<Blob>(`/drafts/${id}/export`),
+  lifecycle: (id: string, target_status: string, reason: string) =>
+    post<Draft>(`/drafts/${id}/lifecycle`, { target_status, reason }, true),
+  receipt: (id: string, input: unknown) =>
+    post<{ id: string; external_id: string }>(`/drafts/${id}/receipts`, input),
+  invoice: (id: string, input: unknown) =>
+    post<{ id: string; status: string; matches: { trace: { result: { exceptions: string[] } } }[] }>(`/drafts/${id}/invoices`, input),
+  approvalPlan: (id: string) => request<{ result: { steps: { required_role: string; acting_role: string }[] } }>(`/drafts/${id}/approval-plan`),
+  matrixApprove: (draft: Draft, comment: string, finance: boolean) =>
+    post<{ approved_step: { required_role: string } }>(`/drafts/${draft.id}/matrix-approve`,
+      { expected_version: draft.version, comment, confirm: true }, finance ? 'finance' : true),
   message: (message: string, run_id?: string, sku_id?: string, history: ChatTurn[] = []) =>
     post<AgentReply>('/agent/message', {
       message,

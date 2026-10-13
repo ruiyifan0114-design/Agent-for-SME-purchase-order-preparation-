@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from backend.domain.schemas import Context, RunRequest
+from backend.domain.inventory.engine import inventory_policy
 
 
 def amount(quantity: int, unit_price: Decimal) -> Decimal:
@@ -14,7 +15,7 @@ def round_order(raw: int, moq: int, pack: int) -> int:
     return ((max(raw, moq) + pack - 1) // pack) * pack
 
 
-def evaluate(context: dict, policy: RunRequest) -> dict:
+def evaluate(context: dict, policy: RunRequest, inventory_rule: dict | None = None) -> dict:
     c = Context.model_validate(context)
     sku = c.sku
     end = policy.as_of + timedelta(days=policy.horizon)
@@ -72,6 +73,15 @@ def evaluate(context: dict, policy: RunRequest) -> dict:
         if any(d.quantity > 0 and p.arrival_date > d.need_date for d in demands):
             issue("LATE_OPEN_PO", "open_po.arrival_date", f"{p.po_number} cannot cover earlier demand", "WARNING")
     raw = sku.target_stock - out["projected_stock"] if out["projected_stock"] < sku.safety_stock else 0
+    if inventory_rule:
+        try:
+            trace = inventory_policy({"on_hand": out["on_hand"], "incoming": out["valid_incoming"],
+                                      "demand": out["demand_qty"]}, inventory_rule)
+        except (ValueError, KeyError, ArithmeticError) as exc:
+            issue("INVALID_STOCK_POLICY", "inventory_policy", str(exc))
+            return out
+        raw = trace["result"]["order_quantity"]
+        out["evidence"]["inventory_policy"] = trace
     out["raw_order_qty"] = raw
     if not raw:
         out.update(status="NO_REORDER", final_order_qty=0, decision_reason="All dated stock checkpoints meet safety stock")
@@ -100,7 +110,8 @@ def evaluate(context: dict, policy: RunRequest) -> dict:
     if blocked():
         return out
     expected = policy.as_of + timedelta(days=m.lead_time_days)
-    first_risk = next(t["date"] for t in timeline if t["projected_stock"] < sku.safety_stock)
+    first_risk = binding["date"] if inventory_rule else next(
+        t["date"] for t in timeline if t["projected_stock"] < sku.safety_stock)
     if expected > date.fromisoformat(first_risk):
         issue("LEAD_TIME_RISK", "commercial.lead_time_days", "New order may arrive after first safety-stock breach; human review needed", "WARNING")
     final = round_order(raw, m.moq, m.pack_multiple)

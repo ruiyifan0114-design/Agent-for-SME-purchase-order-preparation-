@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { api } from './api'
 import DatasetEditor from './DatasetEditor'
+import ProcurementOperations from './ProcurementOperations'
 import type { EditableDataset } from './DatasetEditor'
 import {
   Badge,
@@ -1103,8 +1104,8 @@ export function DraftScreen({
         <div>
           <strong>Human approval framework</strong>
           <span>
-            Below SGD 5,000: Purchasing Manager. SGD 5,000 or above: Purchasing Manager, then
-            Finance Manager.
+            The workspace’s versioned approval policy and any effective approval-matrix steps are
+            enforced by the backend before export.
           </span>
         </div>
       </div>
@@ -1131,6 +1132,7 @@ export function DraftScreen({
               </div>
               <div className="draft-total">
                 <Badge status={d.status} />
+                {d.lifecycle_status && <span>{d.lifecycle_status.replaceAll('_', ' ')}</span>}
                 <strong>
                   <small>{d.currency}</small> {money(d.total)}
                 </strong>
@@ -1171,7 +1173,12 @@ export function DraftScreen({
                         <strong>{l.description}</strong>
                         <small className="block">{l.sku_id}</small>
                       </td>
-                      <td>{number(l.quantity)}</td>
+                      <td>
+                        {number(l.quantity)}
+                        {l.open_quantity !== undefined && l.open_quantity !== l.quantity && (
+                          <small className="block">Open {number(l.open_quantity)}</small>
+                        )}
+                      </td>
                       <td>{l.uom}</td>
                       <td>{money(l.unit_price)}</td>
                       <td>
@@ -1206,6 +1213,7 @@ export function DraftScreen({
                 exported.
               </p>
             )}
+            <ProcurementOperations draft={d} refresh={onSync} />
             <div className="draft-footer">
               <div>
                 {d.approved_at ? (

@@ -2,7 +2,7 @@ from functools import lru_cache
 from secrets import compare_digest
 
 import jwt
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from jwt import PyJWKClient
 from sqlalchemy import func, or_, select
 
@@ -107,13 +107,15 @@ def workspace_identity(
     }
 
 
-def tools(db=Depends(get_session), identity=Depends(workspace_identity)):
+def tools(request: Request, db=Depends(get_session), identity=Depends(workspace_identity)):
     return ProcurementTools(
         db,
         actor=identity["actor"],
         human=identity["human"],
         role=identity["role"],
         workspace_id=identity["workspace_id"],
+        user_id=identity.get("user_id", ""),
+        correlation_id=getattr(request.state, "correlation_id", ""),
     )
 
 
@@ -124,16 +126,16 @@ def _allow(t: ProcurementTools, roles: set[str]):
 
 
 def write_tools(t=Depends(tools)):
-    return _allow(t, {"service", "owner", "procurement", "purchasing"})
+    return _allow(t, {"service", "owner", "admin", "procurement", "procurement_user", "purchasing", "approver"})
 
 
 def purchasing_tools(t=Depends(tools)):
-    return _allow(t, {"owner", "purchasing"})
+    return _allow(t, {"owner", "admin", "purchasing", "approver"})
 
 
 def finance_tools(t=Depends(tools)):
-    return _allow(t, {"owner", "finance"})
+    return _allow(t, {"owner", "admin", "finance", "approver"})
 
 
 def reviewer_tools(t=Depends(tools)):
-    return _allow(t, {"owner", "purchasing", "finance"})
+    return _allow(t, {"owner", "admin", "purchasing", "finance", "approver"})
